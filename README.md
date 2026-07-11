@@ -12,9 +12,12 @@ python -m venv .venv
 
 ./.venv/Scripts/python.exe -m second_brain add path/to/note.md
 ./.venv/Scripts/python.exe -m second_brain search "想搜尋的內容"
+./.venv/Scripts/python.exe -m second_brain ask "想問的問題"
 ```
 
 第一次執行 `add` 會自動下載 embedding 模型(`all-MiniLM-L6-v2`,約 90MB),之後離線可用。
+
+`ask` 需要設定環境變數 `ANTHROPIC_API_KEY` 才能呼叫 Anthropic API;沒設定的話指令會直接印出提示並結束,不會噴出未處理的例外。
 
 > Windows 使用者:CLI 會在啟動時把 stdout/stderr 轉成 UTF-8([cli.py](second_brain/interface/cli.py)),避免主控台預設 codepage 把中文印成亂碼。
 
@@ -34,7 +37,8 @@ second_brain/
 │   ├── vector_store.py   # embedding (ChromaDB, persistent, 本機檔案)
 │   └── store.py          # 對外唯一介面: save_document(), search_similar()
 ├── retrieval/         # 語意搜尋、RAG 問答
-│   └── search.py         # search(): query 轉 embedding → search_similar()
+│   ├── search.py         # search(): query 轉 embedding → search_similar()
+│   └── ask.py            # ask(): search() 結果組 context → 呼叫 Anthropic API 做問答
 └── interface/
     └── cli.py            # typer CLI app
 ```
@@ -54,7 +58,7 @@ second_brain/
 |---|---|---|
 | `second-brain add <file_path>` | ✅ 已實作 | 讀取 markdown/text 檔案 → 切塊 → 產生 embedding → 存進 SQLite + ChromaDB |
 | `second-brain search "<query>" [--top-k K]` | ✅ 已實作 | 把 query 轉成向量,語意搜尋,回傳最相關的片段(含來源、分數) |
-| `second-brain ask "<query>"` | ⏳ 規劃中 | 在 search 結果基礎上用 Anthropic API 做 RAG 問答 |
+| `second-brain ask "<query>" [--top-k K]` | ✅ 已實作 | 在 search 結果基礎上用 Anthropic API(`claude-opus-4-8`)做 RAG 問答,需要 `ANTHROPIC_API_KEY` |
 
 ## 開發
 

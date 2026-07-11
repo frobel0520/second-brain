@@ -5,11 +5,13 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
+import anthropic
 import typer
 
 from second_brain.ingestion.loader import load_document
 from second_brain.processing.chunking import chunk_document
 from second_brain.processing.embedding import get_embedding_provider
+from second_brain.retrieval.ask import ask as run_ask
 from second_brain.retrieval.search import search as run_search
 from second_brain.storage import save_document
 
@@ -23,7 +25,7 @@ app = typer.Typer(help="Second Brain — 個人化知識管理系統")
 
 @app.callback()
 def callback() -> None:
-    """之後會陸續加上 ask 等指令,這裡先強制保留子指令的形式。"""
+    """add / search / ask 三個指令,強制保留子指令的形式。"""
 
 
 @app.command()
@@ -74,6 +76,23 @@ def search(
         typer.echo(f"\n[{rank}] {result.document.title}  (score={result.score:.3f})")
         typer.echo(f"    來源: {result.document.source_path}")
         typer.echo(f"    {snippet}")
+
+
+@app.command()
+def ask(
+    query: str = typer.Argument(..., help="要詢問知識庫的問題"),
+    top_k: int = typer.Option(5, "--top-k", "-k", help="檢索前 k 個最相關的片段作為上下文"),
+) -> None:
+    """在 search 結果基礎上,呼叫 Anthropic API 做問答總結(RAG)。"""
+    try:
+        answer = run_ask(query, top_k=top_k)
+    except (anthropic.AuthenticationError, TypeError) as error:
+        if isinstance(error, TypeError) and "authentication" not in str(error).lower():
+            raise
+        typer.echo("找不到有效的 Anthropic API key,請設定環境變數 ANTHROPIC_API_KEY 後再試一次。")
+        raise typer.Exit(code=1)
+
+    typer.echo(answer)
 
 
 if __name__ == "__main__":
