@@ -16,6 +16,9 @@ dependencies = [
 dev = [
     "pytest>=8.0",
 ]
+ui = [
+    "streamlit>=1.38",
+]
 
 [project.scripts]
 second-brain = "second_brain.interface.cli:app"

@@ -10,20 +10,11 @@ import typer
 
 from second_brain.config import RSS_DEFAULT_LIMIT
 from second_brain.ingestion.loader import load_document
+from second_brain.ingestion.pipeline import IngestResult, ingest_document
 from second_brain.ingestion.rss_loader import load_feed
-from second_brain.models import Document
-from second_brain.processing.chunking import chunk_document
-from second_brain.processing.embedding import get_embedding_provider
-from second_brain.processing.tagging import get_tagging_provider
 from second_brain.retrieval.ask import ask as run_ask
 from second_brain.retrieval.search import search as run_search
-from second_brain.storage import (
-    clear_all,
-    list_documents,
-    remove_document,
-    replace_existing_document,
-    save_document,
-)
+from second_brain.storage import clear_all, list_documents, remove_document
 
 if sys.platform == "win32":
     # Windows 主控台預設用系統 ANSI codepage,不是 UTF-8,印中文會變亂碼。
@@ -38,36 +29,17 @@ def callback() -> None:
     """add / add-feed / search / ask / list / remove / clear 七個指令,強制保留子指令的形式。"""
 
 
-def _ingest_document(document: Document) -> str | None:
-    """標籤 → 切塊 → embedding → 存進知識庫,回傳給使用者看的狀態訊息。
+def _format_ingest_result(result: IngestResult, location: str) -> str:
+    tag_suffix = f"  標籤:{', '.join(result.document.tags)}" if result.document.tags else ""
 
-    內容是空的話回傳 None,讓呼叫端決定要當成硬錯誤還是略過繼續跑下一篇。
-    """
-    document.tags = get_tagging_provider().tag(document)
-    chunks = chunk_document(document)
-
-    if not chunks:
-        return None
-
-    replaced = replace_existing_document(document.source_path, document.content)
-
-    provider = get_embedding_provider()
-    embeddings = provider.embed([chunk.content for chunk in chunks])
-    for chunk, embedding in zip(chunks, embeddings):
-        chunk.embedding = embedding
-
-    save_document(document, chunks)
-
-    tag_suffix = f"  標籤:{', '.join(document.tags)}" if document.tags else ""
-
-    if replaced is None:
-        return f"已加入「{document.title}」— {len(chunks)} 個片段{tag_suffix}"
-    if replaced.source_path != document.source_path:
+    if result.status == "added":
+        return f"已加入「{result.document.title}」— {result.chunk_count} 個片段 ({location}){tag_suffix}"
+    if result.status == "renamed":
         return (
-            f"偵測到內容跟舊紀錄相同、但路徑變了(原路徑:{replaced.source_path}),"
-            f"視為搬家/改名並取代舊版本 — {len(chunks)} 個片段{tag_suffix}"
+            f"偵測到內容跟舊紀錄相同、但路徑變了(原路徑:{result.previous_source_path}),"
+            f"視為搬家/改名並取代舊版本 — {result.chunk_count} 個片段 ({location}){tag_suffix}"
         )
-    return f"已更新「{document.title}」— {len(chunks)} 個片段{tag_suffix}"
+    return f"已更新「{result.document.title}」— {result.chunk_count} 個片段 ({location}){tag_suffix}"
 
 
 @app.command()
@@ -86,13 +58,13 @@ def add(
     加入時會自動用本機關鍵字抽取產生標籤。
     """
     document = load_document(file_path)
-    message = _ingest_document(document)
+    result = ingest_document(document)
 
-    if message is None:
+    if result is None:
         typer.echo("檔案內容是空的,沒有東西可以加入。")
         raise typer.Exit(code=1)
 
-    typer.echo(f"{message} ({file_path})")
+    typer.echo(_format_ingest_result(result, str(file_path)))
 
 
 @app.command(name="add-feed")
@@ -122,12 +94,12 @@ def add_feed(
     added = 0
     skipped = 0
     for document in documents:
-        message = _ingest_document(document)
-        if message is None:
+        result = ingest_document(document)
+        if result is None:
             skipped += 1
             continue
         added += 1
-        typer.echo(f"{message} ({document.source_path})")
+        typer.echo(_format_ingest_result(result, document.source_path))
 
     typer.echo(f"完成:{added} 篇已處理,{skipped} 篇內容是空的被略過。")
 
