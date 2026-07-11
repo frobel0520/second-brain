@@ -47,6 +47,11 @@ def delete_chunks(chunk_ids: list[str]) -> None:
     collection.delete(ids=chunk_ids)
 
 
+def delete_all_chunks() -> None:
+    _get_collection()  # 確保 client/collection 已初始化
+    _client.delete_collection(_COLLECTION_NAME)
+
+
 def query_similar(query_embedding: list[float], top_k: int = 5) -> list[dict]:
     collection = _get_collection()
     if collection.count() == 0:

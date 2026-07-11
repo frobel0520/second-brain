@@ -15,9 +15,11 @@ def _isolated_storage(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(vector_store, "_client", None)
 
 
-def _document_with_chunk(doc_id: str, source_path: str, title: str) -> tuple[Document, list[Chunk]]:
-    document = Document(id=doc_id, source_path=source_path, title=title, content="內容")
-    chunks = [Chunk(id=f"{doc_id}-chunk", document_id=doc_id, content="內容", chunk_index=0, embedding=[0.1, 0.2])]
+def _document_with_chunk(
+    doc_id: str, source_path: str, title: str, content: str = "內容"
+) -> tuple[Document, list[Chunk]]:
+    document = Document(id=doc_id, source_path=source_path, title=title, content=content)
+    chunks = [Chunk(id=f"{doc_id}-chunk", document_id=doc_id, content=content, chunk_index=0, embedding=[0.1, 0.2])]
     return document, chunks
 
 
@@ -33,18 +35,42 @@ def test_list_documents_reflects_saved_documents() -> None:
 
 
 def test_replace_existing_document_returns_none_when_no_prior_version() -> None:
-    assert store.replace_existing_document("/tmp/new.md") is None
+    assert store.replace_existing_document("/tmp/new.md", "內容") is None
 
 
-def test_replace_existing_document_removes_old_sqlite_and_chroma_rows() -> None:
-    old_document, old_chunks = _document_with_chunk("doc-1", "/tmp/note.md", "舊版本")
+def test_replace_existing_document_matches_by_path_when_content_changed() -> None:
+    old_document, old_chunks = _document_with_chunk("doc-1", "/tmp/note.md", "舊版本", content="舊內容")
     store.save_document(old_document, old_chunks)
 
-    replaced_title = store.replace_existing_document("/tmp/note.md")
+    replaced = store.replace_existing_document("/tmp/note.md", "新內容")
 
-    assert replaced_title == "舊版本"
+    assert replaced is not None
+    assert replaced.title == "舊版本"
     assert store.list_documents() == []
     assert vector_store._get_collection().count() == 0
+
+
+def test_replace_existing_document_matches_by_content_when_path_changed() -> None:
+    """檔案改名/搬家:路徑變了但內容沒變,應該還是能比對到舊版本。"""
+    old_document, old_chunks = _document_with_chunk(
+        "doc-1", "/old/path/note.md", "筆記", content="相同內容"
+    )
+    store.save_document(old_document, old_chunks)
+
+    replaced = store.replace_existing_document("/new/path/note.md", "相同內容")
+
+    assert replaced is not None
+    assert replaced.source_path == "/old/path/note.md"
+    assert store.list_documents() == []
+    assert vector_store._get_collection().count() == 0
+
+
+def test_replace_existing_document_does_not_match_different_path_and_content() -> None:
+    document, chunks = _document_with_chunk("doc-1", "/tmp/a.md", "A", content="內容A")
+    store.save_document(document, chunks)
+
+    assert store.replace_existing_document("/tmp/b.md", "內容B") is None
+    assert len(store.list_documents()) == 1
 
 
 def test_remove_document_returns_none_when_not_found() -> None:
@@ -58,5 +84,22 @@ def test_remove_document_removes_sqlite_and_chroma_rows() -> None:
     removed_title = store.remove_document("/tmp/note.md")
 
     assert removed_title == "筆記"
+    assert store.list_documents() == []
+    assert vector_store._get_collection().count() == 0
+
+
+def test_clear_all_returns_zero_when_empty() -> None:
+    assert store.clear_all() == 0
+
+
+def test_clear_all_removes_every_document_and_chunk() -> None:
+    doc_a, chunks_a = _document_with_chunk("doc-a", "/tmp/a.md", "A", content="內容A")
+    doc_b, chunks_b = _document_with_chunk("doc-b", "/tmp/b.md", "B", content="內容B")
+    store.save_document(doc_a, chunks_a)
+    store.save_document(doc_b, chunks_b)
+
+    removed_count = store.clear_all()
+
+    assert removed_count == 2
     assert store.list_documents() == []
     assert vector_store._get_collection().count() == 0

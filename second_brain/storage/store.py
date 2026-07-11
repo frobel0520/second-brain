@@ -15,23 +15,29 @@ def list_documents() -> list[DocumentSummary]:
     return sqlite_store.list_documents()
 
 
-def _delete_by_source_path(source_path: str) -> str | None:
-    existing = sqlite_store.get_document_by_source_path(source_path)
-    if existing is None:
-        return None
-
+def _delete_document(existing: Document) -> None:
     chunk_ids = sqlite_store.get_chunk_ids(existing.id)
     vector_store.delete_chunks(chunk_ids)
     sqlite_store.delete_document(existing.id)
-    return existing.title
 
 
-def replace_existing_document(source_path: str) -> str | None:
-    """若同一個來源檔案已經存在,先刪除舊版本(sqlite + chroma)。
+def replace_existing_document(source_path: str, content: str) -> Document | None:
+    """若同一份筆記已經存在,先刪除舊版本(sqlite + chroma)。
 
-    回傳被取代的文件標題;沒有舊版本就回傳 None。
+    比對邏輯:先看 source_path 有沒有舊紀錄(內容改了但路徑沒變);找不到
+    再看有沒有 content 完全相同的舊紀錄(路徑變了但內容沒變 —— 例如檔案
+    改名/搬家)。回傳被取代的舊版本 Document,呼叫端可以比較
+    `existing.source_path` 跟新路徑是否不同來判斷是不是搬家;沒有舊版本
+    就回傳 None。
     """
-    return _delete_by_source_path(source_path)
+    existing = sqlite_store.get_document_by_source_path(source_path)
+    if existing is None:
+        existing = sqlite_store.get_document_by_content(content)
+    if existing is None:
+        return None
+
+    _delete_document(existing)
+    return existing
 
 
 def remove_document(source_path: str) -> str | None:
@@ -39,7 +45,20 @@ def remove_document(source_path: str) -> str | None:
 
     回傳被刪除的文件標題;找不到就回傳 None。
     """
-    return _delete_by_source_path(source_path)
+    existing = sqlite_store.get_document_by_source_path(source_path)
+    if existing is None:
+        return None
+
+    _delete_document(existing)
+    return existing.title
+
+
+def clear_all() -> int:
+    """清空整個知識庫(sqlite + chroma)。回傳被清掉的文件數量。"""
+    removed_count = len(sqlite_store.list_documents())
+    sqlite_store.delete_all_documents()
+    vector_store.delete_all_chunks()
+    return removed_count
 
 
 def search_similar(query_embedding: list[float], top_k: int = 5) -> list[SearchResult]:
