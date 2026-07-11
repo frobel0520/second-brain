@@ -25,6 +25,17 @@ python -m venv .venv
 
 > Windows 使用者:CLI 會在啟動時把 stdout/stderr 轉成 UTF-8([cli.py](second_brain/interface/cli.py)),避免主控台預設 codepage 把中文印成亂碼。
 
+## 網頁介面(Streamlit)
+
+CLI 之外還有一個本機網頁介面,同一個知識庫、同一套底層邏輯,只是換一種操作方式:
+
+```bash
+./.venv/Scripts/python.exe -m pip install -e ".[ui]"
+./.venv/Scripts/python.exe -m streamlit run second_brain/interface/web.py
+```
+
+跑起來後瀏覽器會自動開 `http://localhost:8501`,四個分頁:瀏覽(含刪除)、搜尋、問答、新增筆記(上傳檔案 / 訂閱 RSS)。沒有網頁版的 `clear`,清空知識庫還是要用 CLI(危險操作,刻意不放進網頁介面)。
+
 ## 架構
 
 ```
@@ -33,7 +44,8 @@ second_brain/
 ├── config.py        # 路徑與參數設定(SQLite/Chroma 路徑、chunk size 等)
 ├── ingestion/        # 資料擷取層 — 讀原始資料 → 轉成 Document
 │   ├── loader.py         # 讀 .md / .txt 檔案
-│   └── rss_loader.py      # 讀 RSS/Atom 訂閱來源,一篇文章一個 Document
+│   ├── rss_loader.py      # 讀 RSS/Atom 訂閱來源,一篇文章一個 Document
+│   └── pipeline.py        # ingest_document():標籤→切塊→embedding→dedupe→存檔,CLI/網頁共用
 ├── processing/       # 清洗、切塊、embedding、自動標籤
 │   ├── chunking.py       # chunk_text() / chunk_document()
 │   ├── embedding.py      # EmbeddingProvider 抽象介面 + SentenceTransformer 實作
@@ -46,7 +58,8 @@ second_brain/
 │   ├── search.py         # search(): query 轉 embedding → search_similar()
 │   └── ask.py            # ask(): search() 結果組 context → 呼叫 Anthropic API 做問答
 └── interface/
-    └── cli.py            # typer CLI app
+    ├── cli.py            # typer CLI app
+    └── web.py            # Streamlit 本機網頁介面
 ```
 
 **設計規則**(承襲自 CLAUDE.md):
@@ -55,7 +68,8 @@ second_brain/
 - `EmbeddingProvider` 是抽象介面,之後要換模型或改用 API 只需新增一個實作
 - `add` 對同一份筆記是 upsert 語意:再次 add 會刪掉舊版本(sqlite + chroma)再存新的,不會重複塞入。判斷「同一份筆記」的邏輯:先比對 `source_path`(內容改了但路徑沒變),找不到再比對 `content` 是否完全相同(路徑變了但內容沒變 —— 例如檔案改名/搬家)
 - `TaggingProvider` 也是抽象介面,之後要換成 LLM 或規則式分類只需新增一個實作;`add` 時會自動呼叫,把標籤存進 `Document.tags`
-- `add` 跟 `add-feed` 共用同一套「標籤 → 切塊 → embedding → 存檔」邏輯(`interface/cli.py:_ingest_document()`),加新的 ingestion 來源只要能產生 `Document`,就自動有標籤/dedupe/embedding,不用重寫這段
+- `add` 跟 `add-feed` 共用同一套「標籤 → 切塊 → embedding → 存檔」邏輯(`ingestion/pipeline.py:ingest_document()`),加新的 ingestion 來源或新的 interface(CLI、網頁)只要能產生 `Document`,就自動有標籤/dedupe/embedding,不用重寫這段
+- `interface/` 底下的 `cli.py` 跟 `web.py` 是同一組核心邏輯的兩種操作介面,兩者都不直接碰 SQLite/ChromaDB,一律透過 `storage`/`retrieval`/`ingestion.pipeline` 的介面
 
 資料預設存在 `data/`(已 gitignore):
 - `data/second_brain.db` — SQLite,存文件原文與 metadata

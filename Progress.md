@@ -9,17 +9,21 @@
 ## 現況一句話
 
 CLAUDE.md 的 MVP(`add` / `search` / `ask`)已經做完,另外多做了 `list`、
-`remove`、`clear` 三個指令,`add` 的 dedupe 也從「純比對路徑」升級成
-「路徑或內容任一相同就算同一份筆記」(處理檔案改名/搬家),加了**自動打標籤**
-(`add` 時自動產生標籤,存進 `Document.tags`,`list` 會顯示),這輪又加了
-**第一個新的 ingestion 來源:RSS/Atom 訂閱**(`second-brain add-feed`)。
-44 個測試全過。git 有六個 commit(`a53f756` skeleton+add/search、`a02095a`
-ask、`d72a479` list+upsert、`1ed0686` remove、`269b58f` dedupe+clear、
-`282482a` 自動標籤),**這輪的 RSS ingestion 還沒 commit**。
+`remove`、`clear`、`add-feed`(RSS/Atom ingestion)四個指令,`add` 的 dedupe
+也升級成「路徑或內容任一相同就算同一份筆記」,加了**自動打標籤**。這輪做了
+兩件事:(1) 用真實的 BBC News RSS 網址(`http://feeds.bbci.co.uk/news/world/rss.xml`)
+實測過 `add-feed` 全流程(抓取→標籤→embedding→search 都驗證過);
+(2) 使用者要求要能「自己使用看看」,加了一個 **Streamlit 本機網頁介面**
+(`second_brain/interface/web.py`),把 `add`/`add-feed` 共用的核心邏輯
+從 `interface/cli.py` 抽到 `ingestion/pipeline.py`,讓 CLI 跟網頁介面共用
+同一套「標籤→切塊→embedding→dedupe→存檔」邏輯。48 個測試全過。git 有七個
+commit(`a53f756` skeleton+add/search、`a02095a` ask、`d72a479` list+upsert、
+`1ed0686` remove、`269b58f` dedupe+clear、`282482a` 自動標籤、`d27e201`
+RSS ingestion),**這輪的 pipeline 重構 + 網頁介面還沒 commit**。
 
 ## 環境
 
-- Windows,Python 3.14.4,`.venv/` 在專案根目錄(已裝好所有依賴,含 torch/sentence-transformers/chromadb/anthropic/jieba/feedparser)
+- Windows,Python 3.14.4,`.venv/` 在專案根目錄(已裝好所有依賴,含 torch/sentence-transformers/chromadb/anthropic/jieba/feedparser/streamlit)
 - 沒有 git remote,只有本機 repo
 - 常用指令:
   ```bash
@@ -33,7 +37,7 @@ ask、`d72a479` list+upsert、`1ed0686` remove、`269b58f` dedupe+clear、
 七個 CLI 指令全部能動,架構細節看 [README.md](README.md#架構):
 
 1. `second-brain add <file>` — 讀 md/txt → 自動打標籤(本機 jieba 詞頻抽取)→ 切塊 → embedding(本機 sentence-transformers)→ 存 SQLite + ChromaDB。**同一份筆記再 add 一次會先刪舊版本再存新的**(`storage/store.py:replace_existing_document`),不是 append。「同一份筆記」的判斷邏輯之前升級過,見下面決策說明。
-2. `second-brain add-feed <feed_url> [--limit/-n N]` — 這輪新加的。抓取 RSS/Atom 來源,把每篇文章轉成一個 Document,跑同一套 `_ingest_document()` 流程(標籤/切塊/embedding/dedupe/存檔)。見下面「已經做完的東西」下方的專節說明。
+2. `second-brain add-feed <feed_url> [--limit/-n N]` — 抓取 RSS/Atom 來源,把每篇文章轉成一個 Document,跑同一套 `ingest_document()` 流程(標籤/切塊/embedding/dedupe/存檔)。這輪用真實的 BBC News 網址實測過,見下面專節說明。
 3. `second-brain search "<query>" [--top-k K]` — query 轉 embedding → ChromaDB cosine 相似度搜尋 → 印出來源+分數。
 4. `second-brain ask "<query>" [--top-k K]` — 在 search 結果上組 context,呼叫 Anthropic API(`claude-opus-4-8`,寫死在 `config.ANSWER_MODEL`)做 RAG 問答。
 5. `second-brain list` — 列出知識庫裡的文件(標題、片段數、來源路徑、標籤)。
@@ -42,11 +46,19 @@ ask、`d72a479` list+upsert、`1ed0686` remove、`269b58f` dedupe+clear、
 
 **自動打標籤**(是「自動化處理」這個大方向的第一小步):`add`/`add-feed` 讀進文件後會呼叫 `processing/tagging.py` 的 `get_tagging_provider().tag(document)`,把結果存進 `Document.tags`(SQLite `documents.tags` 欄位,JSON 字串)。`list`/`add`/`add-feed` 的輸出訊息都會顯示標籤。`TaggingProvider` 是抽象介面(跟 `EmbeddingProvider` 同樣的設計慣例),目前唯一實作是 `KeywordFrequencyTaggingProvider`:用 jieba 斷詞(中文)+ 保留原樣的英文單字,濾掉停用詞,取詞頻最高的前 `config.MAX_TAGS`(預設 5)個當標籤。之後要換成 LLM 分類或規則式邏輯,只要換掉 `get_tagging_provider()` 回傳的實作。
 
-**RSS/Atom ingestion**(這輪新加的,CLAUDE.md「更多 ingestion 來源」的第一個):新增 `ingestion/rss_loader.py` 的 `load_feed(feed_url, limit=None) -> list[Document]`,用 `feedparser` 解析 feed,每個 entry 轉成一個 `Document`:
+**RSS/Atom ingestion**(CLAUDE.md「更多 ingestion 來源」的第一個):`ingestion/rss_loader.py` 的 `load_feed(feed_url, limit=None) -> list[Document]`,用 `feedparser` 解析 feed,每個 entry 轉成一個 `Document`:
   - `source_path` 用文章的 `link`(dedupe/`remove` 都靠這個欄位比對,語意上等同本機檔案的路徑)
   - `content` 優先取 `content:encoded`,沒有就退回 `summary`/`description`,再過一個很陽春的正則去標籤(`_strip_html`,不是完整 HTML parser)
-  - `feed_url` 參數其實是「feedparser 看得懂的任何東西」——網址、本機檔案路徑、feed 原始內容字串都吃,測試/手動驗證因此可以完全不連網(直接餵 XML 字串或本機檔案)
-  - CLI 端 `add-feed` 每篇文章都跑 `_ingest_document()`(跟 `add` 共用的核心邏輯,見下面決策說明),所以自動有標籤/dedupe/embedding,不用重寫
+  - `feed_url` 參數其實是「feedparser 看得懂的任何東西」——網址、本機檔案路徑、feed 原始內容字串都吃,單元測試因此完全不連網(直接餵 XML 字串)
+  - **這輪已經用真實網址實測過**:`http://feeds.bbci.co.uk/news/world/rss.xml`(BBC News 國際版),`add-feed --limit 5` 抓了 5 篇真實文章,標籤、dedupe(重跑一次變成「已更新」不會重複)、`search` 語意排序全部驗證過在真實英文新聞內容上正常運作。之前「還沒對真實網址測過」這個粗糙邊界已經解決。
+
+**Streamlit 網頁介面**(這輪新加的,使用者要求要能「自己使用看看」):`second_brain/interface/web.py`,`streamlit run` 啟動,四個分頁:
+  - **瀏覽**:列出所有文件(標題/片段數/標籤/來源),每筆有刪除按鈕
+  - **搜尋**:文字框 + 滑桿(top-k),結果卡片顯示分數/來源/片段內容
+  - **問答**:文字框問問題,沒有 `ANTHROPIC_API_KEY` 會顯示友善錯誤(跟 CLI 的 `ask` 一致)
+  - **新增筆記**:上傳本機檔案(存到 temp file 再走 `load_document()`)、或輸入 RSS 網址走 `load_feed()`
+  - 用 `@st.cache_resource` 包一個 `_warm_up_providers()`,頁面第一次載入就把 embedding/tagging 模型準備好,避免 Streamlit 每次互動重跑整支 script 時反覆重新載入模型
+  - **沒有網頁版的 `clear`**:清空整個知識庫這種危險操作刻意只留在 CLI,網頁介面不放
 
 ## 中途做的非顯而易見的決策(為什麼這樣寫)
 
@@ -60,9 +72,13 @@ ask、`d72a479` list+upsert、`1ed0686` remove、`269b58f` dedupe+clear、
 - **`clear` 指令的確認機制**:比照一般 CLI 慣例,預設互動確認(`typer.confirm`),避免使用者手滑清空整個知識庫;加 `--yes`/`-y` 是為了以後如果要串腳本或自動化清庫時可以跳過互動。
 - **自動標籤一開始用純 regex n-gram、後來改成 jieba**:第一版偷懶用「連續中文字 2~4 個字」當候選詞(不用額外依賴),結果實測(用一篇講資料庫索引的中文筆記)標籤變成「資料庫索」「引筆記」這種無意義片段,問過使用者後決定加 `jieba` 依賴(純 Python、本機執行、不用連網/API key,符合 local-first 原則)換成真的中文斷詞。同一篇筆記改善後的標籤是「索引、資料、查詢、效能、筆記」,明顯可用。**教訓**:粗糙的字元切分對中文完全不 work,之後如果還有需要斷詞的功能,直接用 jieba,不要再嘗試 regex 捷徑。
 - **`documents` 表加了 `tags` 欄位**(`TEXT NOT NULL DEFAULT '[]'`,JSON 字串):因為 schema 是 `CREATE TABLE IF NOT EXISTS`,不會自動幫已存在的舊資料庫加欄位。這次開發過程中就踩到一次——手動測試時本機已經有一個空的 `data/second_brain.db`(之前 smoke test `clear` 指令留下的,0 筆文件),沒有 `tags` 欄位,導致 `add` 直接噴 `OperationalError: no such column: tags`。因為那個 db 是空的(不是使用者的真實資料),直接刪掉重建解決。**如果之後 schema 還要再改,要注意這個專案目前沒有 migration 機制**,`data/` 是空的時候可以直接刪重建,但如果使用者已經囤了真實筆記,刪重建就會把知識庫清空——到時候要嘛先做個簡單的 migration(`ALTER TABLE ... ADD COLUMN`),要嘛提醒使用者資料要重新 `add` 一次。
-- **把 `add` 的核心邏輯抽成 `_ingest_document()`**(`interface/cli.py`):加 `add-feed` 之前,「標籤 → 切塊 → embedding → dedupe → 存檔」這段邏輯只有 `add` 在用;現在 `add-feed` 要處理一批文章,重複這段邏輯不划算,所以抽成共用函式。回傳值設計成 `str | None`(訊息字串,或 `None` 代表內容是空的),讓兩個呼叫端各自決定空內容要怎麼處理——`add` 是硬錯誤(`exit(1)`),`add-feed` 是略過繼續跑下一篇(因為一個 feed 裡某篇文章是空的,不該讓整批失敗)。**這是刻意的介面設計**,不是隨便回傳 `None`。
-- **RSS 內容的 HTML 去標籤用正則,不是完整 parser**(`rss_loader.py:_strip_html`):跟自動標籤一開始犯的錯一樣的取捨——先用最簡單的方法(`<[^>]+>` 正則 + `html.unescape`)讓 pipeline 跑起來,不追求對所有不規則 HTML 都正確。手動測試過一段有 `<p>`/`<b>` 巢狀標籤的內容,結果是乾淨的,但沒有測過更複雜的 HTML(例如 `<script>`/`<style>` 內容目前不會被特別排除,標籤內的文字會被當成一般內容留下)。如果之後發現真實 RSS 來源的內容跑出奇怪的殘留文字,可以考慮換成 `beautifulsoup4` 之類的正規 HTML parser。
-- **`feed_url` 參數故意設計成「網址或本機路徑或原始內容都吃」**:因為 `feedparser.parse()` 本身就支援這三種輸入、會自動判斷,沒有特別去區分反而讓測試/手動驗證可以完全不連網(單元測試直接餵 RSS XML 字串,手動驗證用本機 `.xml` 檔案),这次全程沒有對外發過一次真的網路請求也驗證過整條流程能動。**沒驗證到的事**:還沒對一個真實的 HTTP(S) feed 網址跑過 `add-feed`,理論上 `feedparser` 會用 `urllib` 發請求,行為上應該跟餵字串一樣,但沒有實測過真的網路延遲/重導向/HTTP 錯誤情境。
+- **把 `add` 的核心邏輯抽成 `ingest_document()`**:一開始(上輪加 `add-feed` 時)先抽成 `interface/cli.py` 裡的私有函式 `_ingest_document()`,回傳訊息字串。這輪因為使用者要求要有網頁介面,`web.py` 也需要同一套邏輯,再把它從 `interface/cli.py` 搬到 `ingestion/pipeline.py`(獨立模組,不屬於任何一個 interface),回傳值也從「預先格式化好的中文訊息字串」改成結構化的 `IngestResult`(dataclass:`document`/`chunk_count`/`status: Literal["added","updated","renamed"]`/`previous_source_path`)。**為什麼要改成結構化資料而不是字串**:CLI 跟 Streamlit 兩種介面對「怎麼呈現這個結果」需求不一樣(CLI 印一行文字,Streamlit 要分 `st.success`/`st.warning`、加 emoji、分段顯示),如果繼續回傳寫死的中文字串,Streamlit 那端就會被迫重新解析字串或整個繞過共用函式各自兜一份邏輯,回頭又製造重複。CLI 這邊另外寫了 `_format_ingest_result()` 把結構化結果轉成人類看的訊息。
+- **RSS 內容的 HTML 去標籤用正則,不是完整 parser**(`rss_loader.py:_strip_html`):跟自動標籤一開始犯的錯一樣的取捨——先用最簡單的方法(`<[^>]+>` 正則 + `html.unescape`)讓 pipeline 跑起來,不追求對所有不規則 HTML 都正確。用真實 BBC 新聞內容測過,結果是乾淨的,但沒有測過更複雜的 HTML(例如 `<script>`/`<style>` 內容目前不會被特別排除,標籤內的文字會被當成一般內容留下)。如果之後發現某些 RSS 來源的內容跑出奇怪的殘留文字,可以考慮換成 `beautifulsoup4` 之類的正規 HTML parser。
+- **`feed_url` 參數故意設計成「網址或本機路徑或原始內容都吃」**:因為 `feedparser.parse()` 本身就支援這三種輸入、會自動判斷,讓單元測試可以直接餵 RSS XML 字串、完全不連網。這輪額外用真實網址(BBC News)驗證過同一個函式對 HTTP(S) 網址一樣有效,行為跟餵字串/檔案一致。
+- **Streamlit UI 選型**:問過使用者「要哪種 UI」,選項是 Streamlit 網頁 / 終端機互動介面(TUI)/ 正式 Web App(FastAPI+前端),使用者選 Streamlit。理由記錄下來以防之後想換:Streamlit 是單一 Python 依賴、一個指令跑起來、不用寫前後端分離的架構,最符合目前「先求能動」的階段;缺點是不像正式 web app 那麼有彈性(之後如果要多人使用或要更精緻的互動,可能得換掉)。
+- **網頁介面故意不做 `clear`**:清空整個知識庫是最危險的操作,CLI 版本已經有 `typer.confirm()` 互動確認 + `--yes` 兩層設計;網頁介面上按鈕很容易手滑點到,決定先不做,清空知識庫這件事保留在 CLI(需要打指令,天然多一層「刻意」的門檻)。
+- **`add-feed`/上傳檔案在網頁介面上不是「新增就馬上出現在瀏覽分頁」**:Streamlit 每次互動都是重新整個 script 重跑一次,`ingest_document()` 執行完之後資料已經寫進 SQLite/ChromaDB,但使用者要手動切到「瀏覽」分頁(觸發新的一次 rerun)才會看到最新結果,目前沒有自動跳轉或者 toast 提示「已經存好了,去瀏覽分頁看看」。這是能接受的粗糙點,不是 bug。
+- **手動驗證網頁介面時發現的自動化工具限制**(跟程式碼本身無關,記錄下來是因為之後如果還要用瀏覽器自動化測 Streamlit 應用會再踩到):`computer` 工具的 `type`/`key` 動作有時候不會觸發 Streamlit React 元件的內部事件處理(尤其是 `st.text_input` 需要「真的」keydown 事件才會 commit 值並觸發 rerun),用 `javascript_tool` 搭配原生 `HTMLInputElement` 的 setter(`Object.getOwnPropertyDescriptor(...).set`)+ 手動 `dispatchEvent(new KeyboardEvent('keydown', {keyCode:13,...}))` 比較可靠。另外這次的瀏覽器 `screenshot` 動作一直逾時,改用 `get_page_text`/`read_page`/直接查 DB 驗證資料正確性,不影響驗證結果。
 
 ## 已知的粗糙邊界(還沒處理,不算 bug,是刻意先跳過)
 
@@ -73,8 +89,11 @@ ask、`d72a479` list+upsert、`1ed0686` remove、`269b58f` dedupe+clear、
 - `search`/`ask` 目前**不會**顯示文件的標籤,只有 `add`/`add-feed` 完成訊息跟 `list` 會顯示。
 - 沒有針對標籤的操作(例如按標籤過濾 `list`/`search`),純粹先把資料存起來。
 - `add-feed` 的 HTML 去標籤是陽春正則,不是完整 HTML parser(見上面決策說明);`<script>`/`<style>` 內容不會被排除。
-- `add-feed` 還沒對一個真實的網址跑過(只測過本機檔案/原始字串),真的 HTTP 請求路徑理論上沒問題但沒實測過。
 - `add-feed` 沒有記錄「這個 feed 訂閱過」這件事,每次都要使用者自己再打一次網址,沒有「訂閱清單」的概念(例如 `second-brain feeds list`/`second-brain feeds sync` 這種),要重複抓新文章得手動再跑一次 `add-feed`。
+- **Streamlit 網頁介面沒有 `clear`**(刻意的,見上面決策說明),要清空知識庫還是得用 CLI。
+- **網頁介面的「新增筆記」完成後不會自動導去「瀏覽」分頁**,使用者要自己點過去才看得到剛加的東西(見上面決策說明)。
+- **網頁介面目前沒有針對大量文件的分頁/捲動優化**,跟 CLI 的 `list` 一樣是先求能動,文件一多畫面會變長。
+- **`streamlit` 是獨立的 optional dependency**(`pyproject.toml` 的 `[project.optional-dependencies].ui`),裝 `.[dev]` 不會自動裝到,要另外 `pip install -e ".[ui]"` 或 `.[dev,ui]`。
 
 ## 接下來可能的方向(還沒決定,是這輪對話結尾討論到的選項)
 
@@ -82,17 +101,22 @@ CLAUDE.md「未來規劃方向」列的:
 - 更多 ingestion 來源的其餘部分(瀏覽器書籤、Readwise/Instapaper、Obsidian/Notion 匯出——RSS 這一個已經做完)
 - Hybrid search(關鍵字 + 語意搜尋並用)
 - 自動化處理的其餘部分(關聯筆記推薦、去重複——自動打標籤這一小塊已經做完)
-- Web UI 或 Raycast/Alfred 整合
+- Web UI 或 Raycast/Alfred 整合(**Streamlit 網頁介面這輪已經做完基本版**,但如果要往「多人使用」或更精緻互動的方向,可能要考慮換成正式 web app)
 
-使用者說這些方向都想做,已經照優先順序做完 `remove` → 「更聰明的 dedupe」+「清空知識庫指令」→ 「自動打標籤(殼)」→ 「RSS ingestion」。問過使用者 ingestion 來源要先做哪個,選了 RSS(理由:範圍最小、不用 API key)。**下一個對話開始時,建議問使用者接下來要做哪個**,不要自己選。
+使用者說這些方向都想做,已經照優先順序做完 `remove` → 「更聰明的 dedupe」+「清空知識庫指令」→ 「自動打標籤(殼)」→ 「RSS ingestion」→ 「Streamlit 網頁介面」。**下一個對話開始時,建議問使用者接下來要做哪個**,不要自己選。
 
-「已知的粗糙邊界」裡 `add-feed` 的部分(訂閱清單、真實網址還沒實測)也是候選,如果使用者常態性地要追蹤同一批 feed,「訂閱清單 + 一鍵同步全部」會比現在的「每次手動打網址」更有用,可以主動提。
+候選(依這輪過程中冒出來的想法排序,不代表優先順序):
+- **feed 訂閱清單**(見「已知的粗糙邊界」):如果使用者常態性要追蹤同一批 RSS 來源,「訂閱清單 + 一鍵同步全部」會比現在的「每次手動打網址」更有用。
+- 更多 ingestion 來源(瀏覽器書籤、Readwise/Instapaper、Obsidian/Notion 匯出)。
+- Hybrid search、關聯筆記推薦、去重複。
+- 網頁介面的細節打磨(新增後自動跳轉、分頁、更明確的操作回饋)——如果使用者開始拿網頁介面當日常工具用,這些會變得比較有感。
 
 ## 交接檢查清單(接手時建議做的事)
 
-1. `git log --oneline` 確認目前在哪個 commit,`git status` 確認有沒有沒 commit 的東西(這次交接時,**RSS ingestion 這批預期還沒 commit**)
-2. `./.venv/Scripts/python.exe -m pytest -q` 應該要 44 個全過、~4 秒內跑完
+1. `git log --oneline` 確認目前在哪個 commit,`git status` 確認有沒有沒 commit 的東西(這次交接時,**pipeline 重構 + Streamlit 網頁介面這批預期還沒 commit**)
+2. `./.venv/Scripts/python.exe -m pytest -q` 應該要 48 個全過、~4 秒內跑完
 3. 如果要手動測 `add`/`search`,第一次跑會下載 ~90MB 的 embedding 模型,需要網路;jieba 第一次執行也會在本機建 prefix dict 快取(不用連網,純本機運算,第一次會慢個零點幾秒)
 4. 如果要手動測 `ask`,需要使用者提供 `ANTHROPIC_API_KEY`
-5. `pyproject.toml` 這輪陸續加了 `jieba>=0.42`、`feedparser>=6.0` 依賴,如果是全新環境要記得 `pip install -e ".[dev]"` 重新裝一次
-6. 如果要手動測 `add-feed` 又不想真的連網,`feedparser.parse()` 吃本機檔案路徑或原始 XML 字串都可以,不用真的丟一個 HTTP 網址進去
+5. `pyproject.toml` 這輪陸續加了 `jieba>=0.42`、`feedparser>=6.0`、`streamlit>=1.38`(在 `[project.optional-dependencies].ui`,不在預設 `dev` 裡)依賴,如果是全新環境要記得重新 `pip install -e ".[dev]"`(CLI/測試)跟 `pip install -e ".[ui]"`(網頁介面)
+6. 如果要手動測 `add-feed` 又不想真的連網,`feedparser.parse()` 吃本機檔案路徑或原始 XML 字串都可以;這輪也已經用真實網址(BBC News)驗證過連網路徑沒問題
+7. 網頁介面用 `./.venv/Scripts/python.exe -m streamlit run second_brain/interface/web.py` 啟動(或 `.claude/launch.json` 裡的 `second-brain-web` 設定,`preview_start` 可以直接用);如果又要用瀏覽器自動化去驗證,見上面「決策」區塊記錄的工具限制(text_input 用 `computer` 的 type/key 不一定會觸發 rerun,要用 `javascript_tool` 搭配原生 setter + dispatchEvent)
