@@ -82,3 +82,27 @@ def test_delete_document_removes_document_and_chunks(tmp_path: Path) -> None:
 
     assert sqlite_store.get_document("doc-1", db_path=db_path) is None
     assert sqlite_store.get_chunk_ids("doc-1", db_path=db_path) == []
+
+
+def test_get_document_by_content(tmp_path: Path) -> None:
+    db_path = tmp_path / "test.db"
+    document = Document(id="doc-1", source_path="/tmp/note.md", title="note", content="hello world")
+    sqlite_store.insert_document(document, [], db_path=db_path)
+
+    assert sqlite_store.get_document_by_content("hello world", db_path=db_path).id == "doc-1"
+    assert sqlite_store.get_document_by_content("nope", db_path=db_path) is None
+
+
+def test_delete_all_documents_removes_everything(tmp_path: Path) -> None:
+    db_path = tmp_path / "test.db"
+    doc_a = Document(id="doc-a", source_path="/tmp/a.md", title="A", content="a")
+    doc_b = Document(id="doc-b", source_path="/tmp/b.md", title="B", content="b")
+    sqlite_store.insert_document(
+        doc_a, [Chunk(id="c1", document_id="doc-a", content="x", chunk_index=0)], db_path=db_path
+    )
+    sqlite_store.insert_document(doc_b, [], db_path=db_path)
+
+    sqlite_store.delete_all_documents(db_path=db_path)
+
+    assert sqlite_store.list_documents(db_path=db_path) == []
+    assert sqlite_store.get_chunk_ids("doc-a", db_path=db_path) == []

@@ -63,3 +63,21 @@ def test_delete_chunks_removes_only_given_ids() -> None:
     collection = vector_store._get_collection()
     assert collection.count() == 1
     assert collection.get(ids=["c2"])["ids"] == ["c2"]
+
+
+def test_delete_all_chunks_empties_the_collection() -> None:
+    chunks = [
+        Chunk(id="c1", document_id="d1", content="a", chunk_index=0, embedding=[0.1, 0.2]),
+        Chunk(id="c2", document_id="d1", content="b", chunk_index=1, embedding=[0.3, 0.4]),
+    ]
+    vector_store.add_chunks(chunks)
+
+    vector_store.delete_all_chunks()
+
+    assert vector_store._get_collection().count() == 0
+
+
+def test_delete_all_chunks_when_nothing_was_ever_added() -> None:
+    vector_store.delete_all_chunks()
+
+    assert vector_store._get_collection().count() == 0

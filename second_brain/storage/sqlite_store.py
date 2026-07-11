@@ -110,6 +110,20 @@ def get_document_by_source_path(source_path: str, db_path: Path | None = None) -
     return None if row is None else _row_to_document(row)
 
 
+def get_document_by_content(content: str, db_path: Path | None = None) -> Document | None:
+    conn = _connect(db_path)
+    try:
+        row = conn.execute(
+            "SELECT id, source_path, title, content, created_at, metadata FROM documents "
+            "WHERE content = ?",
+            (content,),
+        ).fetchone()
+    finally:
+        conn.close()
+
+    return None if row is None else _row_to_document(row)
+
+
 def list_documents(db_path: Path | None = None) -> list[DocumentSummary]:
     conn = _connect(db_path)
     try:
@@ -151,5 +165,15 @@ def delete_document(document_id: str, db_path: Path | None = None) -> None:
         with conn:
             conn.execute("DELETE FROM chunks WHERE document_id = ?", (document_id,))
             conn.execute("DELETE FROM documents WHERE id = ?", (document_id,))
+    finally:
+        conn.close()
+
+
+def delete_all_documents(db_path: Path | None = None) -> None:
+    conn = _connect(db_path)
+    try:
+        with conn:
+            conn.execute("DELETE FROM chunks")
+            conn.execute("DELETE FROM documents")
     finally:
         conn.close()

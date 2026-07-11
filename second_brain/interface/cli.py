@@ -14,6 +14,7 @@ from second_brain.processing.embedding import get_embedding_provider
 from second_brain.retrieval.ask import ask as run_ask
 from second_brain.retrieval.search import search as run_search
 from second_brain.storage import (
+    clear_all,
     list_documents,
     remove_document,
     replace_existing_document,
@@ -30,7 +31,7 @@ app = typer.Typer(help="Second Brain — 個人化知識管理系統")
 
 @app.callback()
 def callback() -> None:
-    """add / search / ask / list / remove 五個指令,強制保留子指令的形式。"""
+    """add / search / ask / list / remove / clear 六個指令,強制保留子指令的形式。"""
 
 
 @app.command()
@@ -54,7 +55,7 @@ def add(
         typer.echo("檔案內容是空的,沒有東西可以加入。")
         raise typer.Exit(code=1)
 
-    replaced_title = replace_existing_document(document.source_path)
+    replaced = replace_existing_document(document.source_path, document.content)
 
     provider = get_embedding_provider()
     embeddings = provider.embed([chunk.content for chunk in chunks])
@@ -63,10 +64,15 @@ def add(
 
     save_document(document, chunks)
 
-    if replaced_title:
-        typer.echo(f"已更新「{document.title}」— {len(chunks)} 個片段 ({file_path})")
-    else:
+    if replaced is None:
         typer.echo(f"已加入「{document.title}」— {len(chunks)} 個片段 ({file_path})")
+    elif replaced.source_path != document.source_path:
+        typer.echo(
+            f"偵測到內容跟舊紀錄相同、但路徑變了(原路徑:{replaced.source_path}),"
+            f"視為搬家/改名並取代舊版本 — {len(chunks)} 個片段 ({file_path})"
+        )
+    else:
+        typer.echo(f"已更新「{document.title}」— {len(chunks)} 個片段 ({file_path})")
 
 
 @app.command()
@@ -138,6 +144,21 @@ def remove(
         raise typer.Exit(code=1)
 
     typer.echo(f"已從知識庫移除「{removed_title}」({file_path})")
+
+
+@app.command()
+def clear(
+    yes: bool = typer.Option(False, "--yes", "-y", help="跳過確認,直接清空"),
+) -> None:
+    """清空整個知識庫(sqlite + chroma),不會動到硬碟上的原始檔案。"""
+    if not yes:
+        confirmed = typer.confirm("確定要清空整個知識庫嗎?這個動作無法復原。")
+        if not confirmed:
+            typer.echo("已取消。")
+            raise typer.Exit(code=0)
+
+    removed_count = clear_all()
+    typer.echo(f"已清空知識庫,共移除 {removed_count} 份文件。")
 
 
 if __name__ == "__main__":

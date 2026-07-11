@@ -1,4 +1,5 @@
 from second_brain.storage.store import (
+    clear_all,
     list_documents,
     remove_document,
     replace_existing_document,
@@ -7,6 +8,7 @@ from second_brain.storage.store import (
 )
 
 __all__ = [
+    "clear_all",
     "list_documents",
     "remove_document",
     "replace_existing_document",
