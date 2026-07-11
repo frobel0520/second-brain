@@ -2,13 +2,32 @@
 
 from __future__ import annotations
 
-from second_brain.models import Chunk, Document, SearchResult
+from second_brain.models import Chunk, Document, DocumentSummary, SearchResult
 from second_brain.storage import sqlite_store, vector_store
 
 
 def save_document(document: Document, chunks: list[Chunk]) -> None:
     sqlite_store.insert_document(document, chunks)
     vector_store.add_chunks(chunks)
+
+
+def list_documents() -> list[DocumentSummary]:
+    return sqlite_store.list_documents()
+
+
+def replace_existing_document(source_path: str) -> str | None:
+    """若同一個來源檔案已經存在,先刪除舊版本(sqlite + chroma)。
+
+    回傳被取代的文件標題;沒有舊版本就回傳 None。
+    """
+    existing = sqlite_store.get_document_by_source_path(source_path)
+    if existing is None:
+        return None
+
+    chunk_ids = sqlite_store.get_chunk_ids(existing.id)
+    vector_store.delete_chunks(chunk_ids)
+    sqlite_store.delete_document(existing.id)
+    return existing.title
 
 
 def search_similar(query_embedding: list[float], top_k: int = 5) -> list[SearchResult]:

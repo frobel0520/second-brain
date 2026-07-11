@@ -31,3 +31,12 @@ class SearchResult:
     chunk: Chunk
     document: Document
     score: float
+
+
+@dataclass
+class DocumentSummary:
+    id: str
+    title: str
+    source_path: str
+    created_at: datetime
+    chunk_count: int

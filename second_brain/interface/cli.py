@@ -13,7 +13,7 @@ from second_brain.processing.chunking import chunk_document
 from second_brain.processing.embedding import get_embedding_provider
 from second_brain.retrieval.ask import ask as run_ask
 from second_brain.retrieval.search import search as run_search
-from second_brain.storage import save_document
+from second_brain.storage import list_documents, replace_existing_document, save_document
 
 if sys.platform == "win32":
     # Windows 主控台預設用系統 ANSI codepage,不是 UTF-8,印中文會變亂碼。
@@ -25,7 +25,7 @@ app = typer.Typer(help="Second Brain — 個人化知識管理系統")
 
 @app.callback()
 def callback() -> None:
-    """add / search / ask 三個指令,強制保留子指令的形式。"""
+    """add / search / ask / list 四個指令,強制保留子指令的形式。"""
 
 
 @app.command()
@@ -38,13 +38,18 @@ def add(
         help="要加入知識庫的 markdown/text 檔案路徑",
     ),
 ) -> None:
-    """讀取檔案 → 切塊 → 產生 embedding → 存進 SQLite + ChromaDB。"""
+    """讀取檔案 → 切塊 → 產生 embedding → 存進 SQLite + ChromaDB。
+
+    同一個來源檔案再次 add 會取代舊版本,而不是重複塞進知識庫。
+    """
     document = load_document(file_path)
     chunks = chunk_document(document)
 
     if not chunks:
         typer.echo("檔案內容是空的,沒有東西可以加入。")
         raise typer.Exit(code=1)
+
+    replaced_title = replace_existing_document(document.source_path)
 
     provider = get_embedding_provider()
     embeddings = provider.embed([chunk.content for chunk in chunks])
@@ -53,7 +58,10 @@ def add(
 
     save_document(document, chunks)
 
-    typer.echo(f"已加入「{document.title}」— {len(chunks)} 個片段 ({file_path})")
+    if replaced_title:
+        typer.echo(f"已更新「{document.title}」— {len(chunks)} 個片段 ({file_path})")
+    else:
+        typer.echo(f"已加入「{document.title}」— {len(chunks)} 個片段 ({file_path})")
 
 
 @app.command()
@@ -93,6 +101,21 @@ def ask(
         raise typer.Exit(code=1)
 
     typer.echo(answer)
+
+
+@app.command(name="list")
+def list_command() -> None:
+    """列出知識庫裡目前有哪些文件。"""
+    documents = list_documents()
+
+    if not documents:
+        typer.echo("知識庫是空的,先用 `second-brain add` 加一些筆記吧。")
+        raise typer.Exit(code=0)
+
+    for document in documents:
+        created = document.created_at.strftime("%Y-%m-%d %H:%M")
+        typer.echo(f"{created}  {document.title}  ({document.chunk_count} 個片段)")
+        typer.echo(f"    {document.source_path}")
 
 
 if __name__ == "__main__":

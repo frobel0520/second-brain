@@ -39,6 +39,14 @@ def add_chunks(chunks: list[Chunk]) -> None:
     )
 
 
+def delete_chunks(chunk_ids: list[str]) -> None:
+    if not chunk_ids:
+        return
+
+    collection = _get_collection()
+    collection.delete(ids=chunk_ids)
+
+
 def query_similar(query_embedding: list[float], top_k: int = 5) -> list[dict]:
     collection = _get_collection()
     if collection.count() == 0:

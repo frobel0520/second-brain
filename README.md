@@ -13,6 +13,7 @@ python -m venv .venv
 ./.venv/Scripts/python.exe -m second_brain add path/to/note.md
 ./.venv/Scripts/python.exe -m second_brain search "想搜尋的內容"
 ./.venv/Scripts/python.exe -m second_brain ask "想問的問題"
+./.venv/Scripts/python.exe -m second_brain list
 ```
 
 第一次執行 `add` 會自動下載 embedding 模型(`all-MiniLM-L6-v2`,約 90MB),之後離線可用。
@@ -25,7 +26,7 @@ python -m venv .venv
 
 ```
 second_brain/
-├── models.py       # 共用資料結構: Document, Chunk, SearchResult
+├── models.py       # 共用資料結構: Document, Chunk, SearchResult, DocumentSummary
 ├── config.py        # 路徑與參數設定(SQLite/Chroma 路徑、chunk size 等)
 ├── ingestion/        # 資料擷取層 — 讀原始資料 → 轉成 Document
 │   └── loader.py         # 讀 .md / .txt 檔案
@@ -35,7 +36,7 @@ second_brain/
 ├── storage/          # SQLite + ChromaDB 讀寫封裝
 │   ├── sqlite_store.py   # metadata / 原文 (SQLite)
 │   ├── vector_store.py   # embedding (ChromaDB, persistent, 本機檔案)
-│   └── store.py          # 對外唯一介面: save_document(), search_similar()
+│   └── store.py          # 對外唯一介面: save_document(), search_similar(), list_documents(), replace_existing_document()
 ├── retrieval/         # 語意搜尋、RAG 問答
 │   ├── search.py         # search(): query 轉 embedding → search_similar()
 │   └── ask.py            # ask(): search() 結果組 context → 呼叫 Anthropic API 做問答
@@ -47,6 +48,7 @@ second_brain/
 - `ingestion` 的 loader 只負責「讀原始資料 → Document」,不碰 embedding / 儲存
 - `storage` 對外只暴露 `save_document()`、`search_similar()` 這種乾淨介面,上層不直接碰 SQLite/ChromaDB
 - `EmbeddingProvider` 是抽象介面,之後要換模型或改用 API 只需新增一個實作
+- `add` 對同一個來源檔案(`source_path`)是 upsert 語意:再次 add 會刪掉舊版本(sqlite + chroma)再存新的,不會重複塞入
 
 資料預設存在 `data/`(已 gitignore):
 - `data/second_brain.db` — SQLite,存文件原文與 metadata
@@ -59,6 +61,7 @@ second_brain/
 | `second-brain add <file_path>` | ✅ 已實作 | 讀取 markdown/text 檔案 → 切塊 → 產生 embedding → 存進 SQLite + ChromaDB |
 | `second-brain search "<query>" [--top-k K]` | ✅ 已實作 | 把 query 轉成向量,語意搜尋,回傳最相關的片段(含來源、分數) |
 | `second-brain ask "<query>" [--top-k K]` | ✅ 已實作 | 在 search 結果基礎上用 Anthropic API(`claude-opus-4-8`)做 RAG 問答,需要 `ANTHROPIC_API_KEY` |
+| `second-brain list` | ✅ 已實作 | 列出知識庫裡目前有哪些文件(標題、片段數、來源路徑) |
 
 ## 開發
 
