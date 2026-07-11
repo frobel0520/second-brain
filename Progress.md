@@ -10,19 +10,24 @@
 
 CLAUDE.md 的 MVP(`add` / `search` / `ask`)已經做完,另外多做了 `list`、
 `remove`、`clear`、`add-feed`(RSS/Atom ingestion)四個指令,`add` 的 dedupe
-也升級成「路徑或內容任一相同就算同一份筆記」,加了**自動打標籤**。這輪做了
-兩件事:(1) 用真實的 BBC News RSS 網址(`http://feeds.bbci.co.uk/news/world/rss.xml`)
-實測過 `add-feed` 全流程(抓取→標籤→embedding→search 都驗證過);
-(2) 使用者要求要能「自己使用看看」,加了一個 **Streamlit 本機網頁介面**
-(`second_brain/interface/web.py`),把 `add`/`add-feed` 共用的核心邏輯
-從 `interface/cli.py` 抽到 `ingestion/pipeline.py`,讓 CLI 跟網頁介面共用
-同一套「標籤→切塊→embedding→dedupe→存檔」邏輯;(3) 使用者接著要求要能
-「在專案資料夾那邊就可以跑,或者有個本機捷徑」,加了 [run_web.bat](run_web.bat)
-(雙擊啟動)跟桌面捷徑,過程中抓到一個真的會卡死的 bug(Streamlit 第一次
-非互動啟動會卡在歡迎訊息提示)並修好。48 個測試全過。git 有七個
-commit(`a53f756` skeleton+add/search、`a02095a` ask、`d72a479` list+upsert、
-`1ed0686` remove、`269b58f` dedupe+clear、`282482a` 自動標籤、`d27e201`
-RSS ingestion),**這輪的 pipeline 重構 + 網頁介面 + 一鍵啟動批次檔還沒 commit**。
+也升級成「路徑或內容任一相同就算同一份筆記」,加了**自動打標籤**,今天這一整天
+的對話裡又疊了三層東西:(1) 用真實的 BBC News RSS 網址實測 `add-feed` 全流程;
+(2) 加了 **Streamlit 本機網頁介面**(`second_brain/interface/web.py`),把
+`add`/`add-feed` 共用的核心邏輯從 `interface/cli.py` 抽到 `ingestion/pipeline.py`;
+(3) 加了 [run_web.bat](run_web.bat) 一鍵啟動批次檔 + Windows 開始功能表捷徑,
+過程中抓到並修掉一個真的會卡死的 bug(Streamlit 第一次非互動啟動會卡在歡迎
+訊息提示)。**使用者後來自己用 Windows 開始功能表捷徑打開網頁介面、在自己的瀏覽器上完整跑過一次**:
+一開始貼的是 `https://www.bbc.com/news`(BBC 首頁,不是 feed,失敗),換成正確的
+`http://feeds.bbci.co.uk/news/world/rss.xml` 之後成功抓到 10 篇真實新聞,是**這輪
+唯一一次由使用者本人、在使用者自己的環境(不是我這邊的自動化瀏覽器)完整走過一次
+「新增筆記」流程的驗證**,比先前所有 Claude Browser pane 上的自動化測試都更有代表性。
+對話最後有另外建議一個 BBC 中文網的網址(`feeds.bbci.co.uk/zhongwen/trad/rss.xml`)
+給使用者測中文內容,**但沒有實際驗證過這個中文網址有沒有效**,下次要用時建議先測一次
+再假設它可靠。48 個測試全過。git 有九個 commit(`a53f756` skeleton+add/search、
+`a02095a` ask、`d72a479` list+upsert、`1ed0686` remove、`269b58f` dedupe+clear、
+`282482a` 自動標籤、`d27e201` RSS ingestion、`8ec7442` pipeline 重構+網頁介面、
+`bf94c0c` 一鍵啟動批次檔)。**今天對話最後把網頁介面的圖示從 🧠 換成 📚,這批
+還沒 commit**,下一個對話開始時記得先確認要不要 commit 掉。
 
 ## 環境
 
@@ -62,11 +67,13 @@ RSS ingestion),**這輪的 pipeline 重構 + 網頁介面 + 一鍵啟動批次�
   - **新增筆記**:上傳本機檔案(存到 temp file 再走 `load_document()`)、或輸入 RSS 網址走 `load_feed()`
   - 用 `@st.cache_resource` 包一個 `_warm_up_providers()`,頁面第一次載入就把 embedding/tagging 模型準備好,避免 Streamlit 每次互動重跑整支 script 時反覆重新載入模型
   - **沒有網頁版的 `clear`**:清空整個知識庫這種危險操作刻意只留在 CLI,網頁介面不放
+  - **圖示是 📚(書本),不是 🧠**:一開始隨手用了大腦 emoji(`page_icon`/`st.title` 都是),使用者說想要「知識庫的感覺,不要大腦的圖」,換成 📚。改動範圍只有 `web.py` 這兩處,`.claude/launch.json`、README、桌面/開始功能表捷徑都沒有大腦圖案,不用跟著改。**這批圖示改動這輪對話結束時還沒 commit**,見上面「現況一句話」。
 
-**一鍵啟動網頁介面**(這輪新加的,使用者要求「在專案資料夾那邊就可以跑,或者有個本機捷徑」):
+**一鍵啟動網頁介面**(使用者要求「在專案資料夾那邊就可以跑,或者有個本機捷徑」):
   - [run_web.bat](run_web.bat):放在專案根目錄,雙擊就會 `cd` 到自己所在的目錄再跑 `streamlit run`,不用先手動開終端機/`cd`。
-  - 桌面捷徑「Second Brain.lnk」:指向上面這個 `.bat`,是這輪對話直接在使用者機器上建立的(**只存在這台機器,不在 git repo 裡,`.lnk` 是機器特定的東西,理所當然不追蹤**)。
+  - **捷徑放在哪裡有調整過**:一開始建了桌面捷徑「Second Brain.lnk」,但使用者說自己平常習慣從 Windows 開始功能表開東西,把桌面那個刪了。改成在開始功能表的 Programs 資料夾(`%APPDATA%\Microsoft\Windows\Start Menu\Programs\`)建同名捷徑,一樣指向 `run_web.bat`。**這兩種捷徑都只存在使用者這台機器,不在 git repo 裡,`.lnk` 是機器特定的東西,理所當然不追蹤**——如果之後又聽到「捷徑不見了」,先確認是不是又手動刪過,不是 repo 這邊的問題。
   - **手動驗證時踩到一個真的會卡住的 bug**,已經修掉,細節見下面決策說明。
+  - **這是唯一一個有被使用者本人在自己電腦上真的用過的功能**(見上面「現況一句話」的 BBC 新聞驗證),不只是 Claude 這邊測過。
 
 ## 中途做的非顯而易見的決策(為什麼這樣寫)
 
@@ -104,29 +111,30 @@ RSS ingestion),**這輪的 pipeline 重構 + 網頁介面 + 一鍵啟動批次�
 - **網頁介面目前沒有針對大量文件的分頁/捲動優化**,跟 CLI 的 `list` 一樣是先求能動,文件一多畫面會變長。
 - **`streamlit` 是獨立的 optional dependency**(`pyproject.toml` 的 `[project.optional-dependencies].ui`),裝 `.[dev]` 不會自動裝到,要另外 `pip install -e ".[ui]"` 或 `.[dev,ui]`。
 
-## 接下來可能的方向(還沒決定,是這輪對話結尾討論到的選項)
+## 接下來可能的方向(還沒決定)
 
 CLAUDE.md「未來規劃方向」列的:
 - 更多 ingestion 來源的其餘部分(瀏覽器書籤、Readwise/Instapaper、Obsidian/Notion 匯出——RSS 這一個已經做完)
 - Hybrid search(關鍵字 + 語意搜尋並用)
 - 自動化處理的其餘部分(關聯筆記推薦、去重複——自動打標籤這一小塊已經做完)
-- Web UI 或 Raycast/Alfred 整合(**Streamlit 網頁介面這輪已經做完基本版**,但如果要往「多人使用」或更精緻互動的方向,可能要考慮換成正式 web app)
+- Web UI 或 Raycast/Alfred 整合(**Streamlit 網頁介面已經做完基本版,而且使用者本人已經用過**,如果要往「多人使用」或更精緻互動的方向,可能要考慮換成正式 web app)
 
-使用者說這些方向都想做,已經照優先順序做完 `remove` → 「更聰明的 dedupe」+「清空知識庫指令」→ 「自動打標籤(殼)」→ 「RSS ingestion」→ 「Streamlit 網頁介面」。**下一個對話開始時,建議問使用者接下來要做哪個**,不要自己選。
+使用者說這些方向都想做,已經照優先順序做完 `remove` → 「更聰明的 dedupe」+「清空知識庫指令」→ 「自動打標籤(殼)」→ 「RSS ingestion」→ 「Streamlit 網頁介面」→「一鍵啟動」。**下一個對話開始時,建議問使用者接下來要做哪個**,不要自己選。
 
-候選(依這輪過程中冒出來的想法排序,不代表優先順序):
+候選(不代表優先順序):
 - **feed 訂閱清單**(見「已知的粗糙邊界」):如果使用者常態性要追蹤同一批 RSS 來源,「訂閱清單 + 一鍵同步全部」會比現在的「每次手動打網址」更有用。
 - 更多 ingestion 來源(瀏覽器書籤、Readwise/Instapaper、Obsidian/Notion 匯出)。
+- **YouTube 頻道 RSS**:對話中討論過,使用者問過但決定「先不做」。要注意的是 YouTube 頻道 RSS 只有標題+短描述,**沒有逐字稿**,能做的頂多是「新影片書籤」,不是「影片內容知識庫」;如果之後想做後者,得另外接字幕/逐字稿的來源,不是單純的 RSS ingestion 可以解決的,下次有人提這個要先講清楚這個限制。
 - Hybrid search、關聯筆記推薦、去重複。
-- 網頁介面的細節打磨(新增後自動跳轉、分頁、更明確的操作回饋)——如果使用者開始拿網頁介面當日常工具用,這些會變得比較有感。
+- 網頁介面的細節打磨(新增後自動跳轉、分頁、更明確的操作回饋)——使用者已經開始實際用網頁介面,這些會變得比較有感。
 
 ## 交接檢查清單(接手時建議做的事)
 
-1. `git log --oneline` 確認目前在哪個 commit,`git status` 確認有沒有沒 commit 的東西(這次交接時,**pipeline 重構 + Streamlit 網頁介面這批預期還沒 commit**)
+1. `git log --oneline` 確認目前在哪個 commit,`git status` 確認有沒有沒 commit 的東西(這次交接時,**只有網頁介面圖示改成 📚 這批預期還沒 commit**,其他都已經進 `bf94c0c`)
 2. `./.venv/Scripts/python.exe -m pytest -q` 應該要 48 個全過、~4 秒內跑完
 3. 如果要手動測 `add`/`search`,第一次跑會下載 ~90MB 的 embedding 模型,需要網路;jieba 第一次執行也會在本機建 prefix dict 快取(不用連網,純本機運算,第一次會慢個零點幾秒)
-4. 如果要手動測 `ask`,需要使用者提供 `ANTHROPIC_API_KEY`
+4. 如果要手動測 `ask`,需要使用者提供 `ANTHROPIC_API_KEY`(這台機器目前沒設,使用者已經知道怎麼設定,是自己的事,不用主動催)
 5. `pyproject.toml` 這輪陸續加了 `jieba>=0.42`、`feedparser>=6.0`、`streamlit>=1.38`(在 `[project.optional-dependencies].ui`,不在預設 `dev` 裡)依賴,如果是全新環境要記得重新 `pip install -e ".[dev]"`(CLI/測試)跟 `pip install -e ".[ui]"`(網頁介面)
-6. 如果要手動測 `add-feed` 又不想真的連網,`feedparser.parse()` 吃本機檔案路徑或原始 XML 字串都可以;這輪也已經用真實網址(BBC News)驗證過連網路徑沒問題
-7. 網頁介面用 `./.venv/Scripts/python.exe -m streamlit run second_brain/interface/web.py` 啟動(或 `.claude/launch.json` 裡的 `second-brain-web` 設定,`preview_start` 可以直接用);如果又要用瀏覽器自動化去驗證,見上面「決策」區塊記錄的工具限制(text_input 用 `computer` 的 type/key 不一定會觸發 rerun,要用 `javascript_tool` 搭配原生 setter + dispatchEvent)
-8. 桌面上有一個「Second Brain.lnk」捷徑指向 [run_web.bat](run_web.bat)(這輪在使用者機器上建的,不在 git 裡);如果要驗證雙擊啟動的行為,記得先刪掉 `%USERPROFILE%\.streamlit\credentials.toml` 模擬全新機器,不然「歡迎訊息卡住」那個 bug 修好了沒有根本測不出來
+6. 如果要手動測 `add-feed` 又不想真的連網,`feedparser.parse()` 吃本機檔案路徑或原始 XML 字串都可以;這輪也已經用真實網址(BBC News 英文版)驗證過連網路徑沒問題,是使用者自己驗證的
+7. 開始功能表有一個「Second Brain」捷徑指向 [run_web.bat](run_web.bat)(這輪在使用者機器上建的,不在 git 裡,取代了原本刪掉的桌面捷徑);如果要驗證雙擊啟動的行為,記得先刪掉 `%USERPROFILE%\.streamlit\credentials.toml` 模擬全新機器,不然「歡迎訊息卡住」那個 bug 修好了沒有根本測不出來
+8. 如果要用瀏覽器自動化測 Streamlit 網頁介面,見「中途做的決策」裡記錄的工具限制(text_input 用 `computer` 的 type/key 不一定會觸發 rerun,要用 `javascript_tool` 搭配原生 setter + dispatchEvent)

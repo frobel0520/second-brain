@@ -21,7 +21,7 @@ from second_brain.retrieval.ask import ask as run_ask
 from second_brain.retrieval.search import search as run_search
 from second_brain.storage import list_documents, remove_document
 
-st.set_page_config(page_title="Second Brain", page_icon="🧠", layout="wide")
+st.set_page_config(page_title="Second Brain", page_icon="📚", layout="wide")
 
 
 @st.cache_resource
@@ -33,7 +33,7 @@ def _warm_up_providers() -> None:
 
 _warm_up_providers()
 
-st.title("🧠 Second Brain")
+st.title("📚 Second Brain")
 
 tab_browse, tab_search, tab_ask, tab_add = st.tabs(["瀏覽", "搜尋", "問答", "新增筆記"])
 
