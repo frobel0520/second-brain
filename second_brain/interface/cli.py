@@ -13,7 +13,12 @@ from second_brain.processing.chunking import chunk_document
 from second_brain.processing.embedding import get_embedding_provider
 from second_brain.retrieval.ask import ask as run_ask
 from second_brain.retrieval.search import search as run_search
-from second_brain.storage import list_documents, replace_existing_document, save_document
+from second_brain.storage import (
+    list_documents,
+    remove_document,
+    replace_existing_document,
+    save_document,
+)
 
 if sys.platform == "win32":
     # Windows 主控台預設用系統 ANSI codepage,不是 UTF-8,印中文會變亂碼。
@@ -25,7 +30,7 @@ app = typer.Typer(help="Second Brain — 個人化知識管理系統")
 
 @app.callback()
 def callback() -> None:
-    """add / search / ask / list 四個指令,強制保留子指令的形式。"""
+    """add / search / ask / list / remove 五個指令,強制保留子指令的形式。"""
 
 
 @app.command()
@@ -116,6 +121,23 @@ def list_command() -> None:
         created = document.created_at.strftime("%Y-%m-%d %H:%M")
         typer.echo(f"{created}  {document.title}  ({document.chunk_count} 個片段)")
         typer.echo(f"    {document.source_path}")
+
+
+@app.command()
+def remove(
+    file_path: Path = typer.Argument(
+        ...,
+        help="要從知識庫移除的檔案路徑(檔案不需要還存在於硬碟上)",
+    ),
+) -> None:
+    """從知識庫移除指定檔案的紀錄(sqlite + chroma),不會動到硬碟上的檔案本身。"""
+    removed_title = remove_document(str(file_path.resolve()))
+
+    if removed_title is None:
+        typer.echo(f"知識庫裡沒有找到這個檔案:{file_path}")
+        raise typer.Exit(code=1)
+
+    typer.echo(f"已從知識庫移除「{removed_title}」({file_path})")
 
 
 if __name__ == "__main__":

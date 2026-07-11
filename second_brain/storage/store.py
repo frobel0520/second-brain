@@ -15,11 +15,7 @@ def list_documents() -> list[DocumentSummary]:
     return sqlite_store.list_documents()
 
 
-def replace_existing_document(source_path: str) -> str | None:
-    """若同一個來源檔案已經存在,先刪除舊版本(sqlite + chroma)。
-
-    回傳被取代的文件標題;沒有舊版本就回傳 None。
-    """
+def _delete_by_source_path(source_path: str) -> str | None:
     existing = sqlite_store.get_document_by_source_path(source_path)
     if existing is None:
         return None
@@ -28,6 +24,22 @@ def replace_existing_document(source_path: str) -> str | None:
     vector_store.delete_chunks(chunk_ids)
     sqlite_store.delete_document(existing.id)
     return existing.title
+
+
+def replace_existing_document(source_path: str) -> str | None:
+    """若同一個來源檔案已經存在,先刪除舊版本(sqlite + chroma)。
+
+    回傳被取代的文件標題;沒有舊版本就回傳 None。
+    """
+    return _delete_by_source_path(source_path)
+
+
+def remove_document(source_path: str) -> str | None:
+    """從知識庫刪除指定來源檔案的文件(sqlite + chroma)。
+
+    回傳被刪除的文件標題;找不到就回傳 None。
+    """
+    return _delete_by_source_path(source_path)
 
 
 def search_similar(query_embedding: list[float], top_k: int = 5) -> list[SearchResult]:

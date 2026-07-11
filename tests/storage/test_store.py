@@ -45,3 +45,18 @@ def test_replace_existing_document_removes_old_sqlite_and_chroma_rows() -> None:
     assert replaced_title == "舊版本"
     assert store.list_documents() == []
     assert vector_store._get_collection().count() == 0
+
+
+def test_remove_document_returns_none_when_not_found() -> None:
+    assert store.remove_document("/tmp/missing.md") is None
+
+
+def test_remove_document_removes_sqlite_and_chroma_rows() -> None:
+    document, chunks = _document_with_chunk("doc-1", "/tmp/note.md", "筆記")
+    store.save_document(document, chunks)
+
+    removed_title = store.remove_document("/tmp/note.md")
+
+    assert removed_title == "筆記"
+    assert store.list_documents() == []
+    assert vector_store._get_collection().count() == 0
