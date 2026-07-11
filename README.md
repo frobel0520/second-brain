@@ -32,9 +32,10 @@ second_brain/
 ├── config.py        # 路徑與參數設定(SQLite/Chroma 路徑、chunk size 等)
 ├── ingestion/        # 資料擷取層 — 讀原始資料 → 轉成 Document
 │   └── loader.py         # 讀 .md / .txt 檔案
-├── processing/       # 清洗、切塊、embedding
+├── processing/       # 清洗、切塊、embedding、自動標籤
 │   ├── chunking.py       # chunk_text() / chunk_document()
-│   └── embedding.py      # EmbeddingProvider 抽象介面 + SentenceTransformer 實作
+│   ├── embedding.py      # EmbeddingProvider 抽象介面 + SentenceTransformer 實作
+│   └── tagging.py        # TaggingProvider 抽象介面 + 本機 jieba 詞頻抽取實作
 ├── storage/          # SQLite + ChromaDB 讀寫封裝
 │   ├── sqlite_store.py   # metadata / 原文 (SQLite)
 │   ├── vector_store.py   # embedding (ChromaDB, persistent, 本機檔案)
@@ -51,6 +52,7 @@ second_brain/
 - `storage` 對外只暴露 `save_document()`、`search_similar()` 這種乾淨介面,上層不直接碰 SQLite/ChromaDB
 - `EmbeddingProvider` 是抽象介面,之後要換模型或改用 API 只需新增一個實作
 - `add` 對同一份筆記是 upsert 語意:再次 add 會刪掉舊版本(sqlite + chroma)再存新的,不會重複塞入。判斷「同一份筆記」的邏輯:先比對 `source_path`(內容改了但路徑沒變),找不到再比對 `content` 是否完全相同(路徑變了但內容沒變 —— 例如檔案改名/搬家)
+- `TaggingProvider` 也是抽象介面,之後要換成 LLM 或規則式分類只需新增一個實作;`add` 時會自動呼叫,把標籤存進 `Document.tags`
 
 資料預設存在 `data/`(已 gitignore):
 - `data/second_brain.db` — SQLite,存文件原文與 metadata
@@ -60,10 +62,10 @@ second_brain/
 
 | 指令 | 狀態 | 說明 |
 |---|---|---|
-| `second-brain add <file_path>` | ✅ 已實作 | 讀取 markdown/text 檔案 → 切塊 → 產生 embedding → 存進 SQLite + ChromaDB |
+| `second-brain add <file_path>` | ✅ 已實作 | 讀取 markdown/text 檔案 → 自動標籤 → 切塊 → 產生 embedding → 存進 SQLite + ChromaDB |
 | `second-brain search "<query>" [--top-k K]` | ✅ 已實作 | 把 query 轉成向量,語意搜尋,回傳最相關的片段(含來源、分數) |
 | `second-brain ask "<query>" [--top-k K]` | ✅ 已實作 | 在 search 結果基礎上用 Anthropic API(`claude-opus-4-8`)做 RAG 問答,需要 `ANTHROPIC_API_KEY` |
-| `second-brain list` | ✅ 已實作 | 列出知識庫裡目前有哪些文件(標題、片段數、來源路徑) |
+| `second-brain list` | ✅ 已實作 | 列出知識庫裡目前有哪些文件(標題、片段數、來源路徑、標籤) |
 | `second-brain remove <file_path>` | ✅ 已實作 | 從知識庫移除指定檔案的紀錄(sqlite + chroma),不動硬碟上的檔案本身;檔案不用還存在 |
 | `second-brain clear [--yes/-y]` | ✅ 已實作 | 清空整個知識庫(sqlite + chroma);預設會互動確認,`--yes` 跳過確認 |
 

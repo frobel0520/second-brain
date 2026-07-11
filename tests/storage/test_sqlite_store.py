@@ -35,7 +35,9 @@ def test_get_document_returns_none_when_missing(tmp_path: Path) -> None:
 
 def test_get_document_round_trips(tmp_path: Path) -> None:
     db_path = tmp_path / "test.db"
-    document = Document(id="doc-1", source_path="/tmp/note.md", title="note", content="hello world")
+    document = Document(
+        id="doc-1", source_path="/tmp/note.md", title="note", content="hello world", tags=["greeting"]
+    )
     sqlite_store.insert_document(document, [], db_path=db_path)
 
     fetched = sqlite_store.get_document("doc-1", db_path=db_path)
@@ -44,6 +46,17 @@ def test_get_document_round_trips(tmp_path: Path) -> None:
     assert fetched.id == document.id
     assert fetched.title == document.title
     assert fetched.content == document.content
+    assert fetched.tags == ["greeting"]
+
+
+def test_get_document_defaults_to_empty_tags_when_not_given(tmp_path: Path) -> None:
+    db_path = tmp_path / "test.db"
+    document = Document(id="doc-1", source_path="/tmp/note.md", title="note", content="hello")
+    sqlite_store.insert_document(document, [], db_path=db_path)
+
+    fetched = sqlite_store.get_document("doc-1", db_path=db_path)
+
+    assert fetched.tags == []
 
 
 def test_get_document_by_source_path(tmp_path: Path) -> None:
@@ -57,7 +70,7 @@ def test_get_document_by_source_path(tmp_path: Path) -> None:
 
 def test_list_documents_includes_chunk_counts(tmp_path: Path) -> None:
     db_path = tmp_path / "test.db"
-    doc_a = Document(id="doc-a", source_path="/tmp/a.md", title="A", content="a")
+    doc_a = Document(id="doc-a", source_path="/tmp/a.md", title="A", content="a", tags=["x", "y"])
     doc_b = Document(id="doc-b", source_path="/tmp/b.md", title="B", content="b")
     sqlite_store.insert_document(
         doc_a, [Chunk(id="c1", document_id="doc-a", content="x", chunk_index=0)], db_path=db_path
@@ -68,6 +81,7 @@ def test_list_documents_includes_chunk_counts(tmp_path: Path) -> None:
 
     assert [s.id for s in summaries] == ["doc-a", "doc-b"]
     assert [s.chunk_count for s in summaries] == [1, 0]
+    assert [s.tags for s in summaries] == [["x", "y"], []]
 
 
 def test_delete_document_removes_document_and_chunks(tmp_path: Path) -> None:

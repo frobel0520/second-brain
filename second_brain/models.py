@@ -14,6 +14,7 @@ class Document:
     content: str
     created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     metadata: dict = field(default_factory=dict)
+    tags: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -40,3 +41,4 @@ class DocumentSummary:
     source_path: str
     created_at: datetime
     chunk_count: int
+    tags: list[str] = field(default_factory=list)
