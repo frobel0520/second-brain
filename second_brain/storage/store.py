@@ -1,0 +1,42 @@
+"""對外的乾淨介面。上層不應該直接碰 SQLite/ChromaDB 的細節,只透過這裡互動。"""
+
+from __future__ import annotations
+
+from second_brain.models import Chunk, Document, SearchResult
+from second_brain.storage import sqlite_store, vector_store
+
+
+def save_document(document: Document, chunks: list[Chunk]) -> None:
+    sqlite_store.insert_document(document, chunks)
+    vector_store.add_chunks(chunks)
+
+
+def search_similar(query_embedding: list[float], top_k: int = 5) -> list[SearchResult]:
+    matches = vector_store.query_similar(query_embedding, top_k=top_k)
+
+    document_cache: dict[str, Document] = {}
+    results: list[SearchResult] = []
+
+    for match in matches:
+        document_id = match["document_id"]
+        if document_id not in document_cache:
+            document = sqlite_store.get_document(document_id)
+            if document is None:
+                continue
+            document_cache[document_id] = document
+
+        chunk = Chunk(
+            id=match["chunk_id"],
+            document_id=document_id,
+            content=match["content"],
+            chunk_index=match["chunk_index"],
+        )
+        results.append(
+            SearchResult(
+                chunk=chunk,
+                document=document_cache[document_id],
+                score=1 - match["distance"],
+            )
+        )
+
+    return results
