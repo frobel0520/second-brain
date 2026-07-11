@@ -36,6 +36,10 @@ CLI 之外還有一個本機網頁介面,同一個知識庫、同一套底層邏
 
 跑起來後瀏覽器會自動開 `http://localhost:8501`,四個分頁:瀏覽(含刪除)、搜尋、問答、新增筆記(上傳檔案 / 訂閱 RSS)。沒有網頁版的 `clear`,清空知識庫還是要用 CLI(危險操作,刻意不放進網頁介面)。
 
+**更快的啟動方式**(Windows):直接雙擊專案根目錄的 [run_web.bat](run_web.bat),或桌面上的「Second Brain」捷徑(第一次設定時建立的,指向這個 `.bat`)。
+
+> Streamlit 第一次在沒有終端機互動的情況下啟動(例如雙擊捷徑)會卡住,原因是它會跳出一個一次性的「Welcome to Streamlit」提示,等使用者按 Enter 或輸入 email,但雙擊捷徑開的視窗沒有人能輸入,所以會卡住不動、永遠打不開網頁。[run_web.bat](run_web.bat) 已經處理這個問題:啟動前會自動檢查 `%USERPROFILE%\.streamlit\credentials.toml` 存不存在,不存在就自動建一個空的,讓 Streamlit 略過這個提示。如果直接用 `streamlit run` 指令手動啟動(在終端機裡跑,可以互動),不會遇到這個問題。
+
 ## 架構
 
 ```

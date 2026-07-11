@@ -16,10 +16,13 @@ CLAUDE.md 的 MVP(`add` / `search` / `ask`)已經做完,另外多做了 `list`�
 (2) 使用者要求要能「自己使用看看」,加了一個 **Streamlit 本機網頁介面**
 (`second_brain/interface/web.py`),把 `add`/`add-feed` 共用的核心邏輯
 從 `interface/cli.py` 抽到 `ingestion/pipeline.py`,讓 CLI 跟網頁介面共用
-同一套「標籤→切塊→embedding→dedupe→存檔」邏輯。48 個測試全過。git 有七個
+同一套「標籤→切塊→embedding→dedupe→存檔」邏輯;(3) 使用者接著要求要能
+「在專案資料夾那邊就可以跑,或者有個本機捷徑」,加了 [run_web.bat](run_web.bat)
+(雙擊啟動)跟桌面捷徑,過程中抓到一個真的會卡死的 bug(Streamlit 第一次
+非互動啟動會卡在歡迎訊息提示)並修好。48 個測試全過。git 有七個
 commit(`a53f756` skeleton+add/search、`a02095a` ask、`d72a479` list+upsert、
 `1ed0686` remove、`269b58f` dedupe+clear、`282482a` 自動標籤、`d27e201`
-RSS ingestion),**這輪的 pipeline 重構 + 網頁介面還沒 commit**。
+RSS ingestion),**這輪的 pipeline 重構 + 網頁介面 + 一鍵啟動批次檔還沒 commit**。
 
 ## 環境
 
@@ -60,6 +63,11 @@ RSS ingestion),**這輪的 pipeline 重構 + 網頁介面還沒 commit**。
   - 用 `@st.cache_resource` 包一個 `_warm_up_providers()`,頁面第一次載入就把 embedding/tagging 模型準備好,避免 Streamlit 每次互動重跑整支 script 時反覆重新載入模型
   - **沒有網頁版的 `clear`**:清空整個知識庫這種危險操作刻意只留在 CLI,網頁介面不放
 
+**一鍵啟動網頁介面**(這輪新加的,使用者要求「在專案資料夾那邊就可以跑,或者有個本機捷徑」):
+  - [run_web.bat](run_web.bat):放在專案根目錄,雙擊就會 `cd` 到自己所在的目錄再跑 `streamlit run`,不用先手動開終端機/`cd`。
+  - 桌面捷徑「Second Brain.lnk」:指向上面這個 `.bat`,是這輪對話直接在使用者機器上建立的(**只存在這台機器,不在 git repo 裡,`.lnk` 是機器特定的東西,理所當然不追蹤**)。
+  - **手動驗證時踩到一個真的會卡住的 bug**,已經修掉,細節見下面決策說明。
+
 ## 中途做的非顯而易見的決策(為什麼這樣寫)
 
 - **Windows 主控台 UTF-8 fix**([cli.py](second_brain/interface/cli.py) 開頭):手動測試時發現中文全部變亂碼,原因是 Windows 預設 stdout 編碼不是 UTF-8。已經在 CLI 進入點強制 `sys.stdout.reconfigure(encoding="utf-8")`。**這是一個真的修好的 bug,不是預防性程式碼。**
@@ -79,6 +87,7 @@ RSS ingestion),**這輪的 pipeline 重構 + 網頁介面還沒 commit**。
 - **網頁介面故意不做 `clear`**:清空整個知識庫是最危險的操作,CLI 版本已經有 `typer.confirm()` 互動確認 + `--yes` 兩層設計;網頁介面上按鈕很容易手滑點到,決定先不做,清空知識庫這件事保留在 CLI(需要打指令,天然多一層「刻意」的門檻)。
 - **`add-feed`/上傳檔案在網頁介面上不是「新增就馬上出現在瀏覽分頁」**:Streamlit 每次互動都是重新整個 script 重跑一次,`ingest_document()` 執行完之後資料已經寫進 SQLite/ChromaDB,但使用者要手動切到「瀏覽」分頁(觸發新的一次 rerun)才會看到最新結果,目前沒有自動跳轉或者 toast 提示「已經存好了,去瀏覽分頁看看」。這是能接受的粗糙點,不是 bug。
 - **手動驗證網頁介面時發現的自動化工具限制**(跟程式碼本身無關,記錄下來是因為之後如果還要用瀏覽器自動化測 Streamlit 應用會再踩到):`computer` 工具的 `type`/`key` 動作有時候不會觸發 Streamlit React 元件的內部事件處理(尤其是 `st.text_input` 需要「真的」keydown 事件才會 commit 值並觸發 rerun),用 `javascript_tool` 搭配原生 `HTMLInputElement` 的 setter(`Object.getOwnPropertyDescriptor(...).set`)+ 手動 `dispatchEvent(new KeyboardEvent('keydown', {keyCode:13,...}))` 比較可靠。另外這次的瀏覽器 `screenshot` 動作一直逾時,改用 `get_page_text`/`read_page`/直接查 DB 驗證資料正確性,不影響驗證結果。
+- **`run_web.bat` 一開始沒處理 Streamlit 的「Welcome」提示,會整個卡死**:第一次手動測試雙擊啟動時,發現視窗開了、python 進程也在跑,但 port 8501 永遠沒 bind、瀏覽器打不開。原因是 Streamlit 第一次在「有 console 但沒人可以互動輸入」的情況下執行(例如被 `Start-Process`/雙擊捷徑這種方式啟動的分離視窗),會卡在一個一次性的「Welcome to Streamlit,請輸入 email 或按 Enter 跳過」的 stdin 提示——沒有 `%USERPROFILE%\.streamlit\credentials.toml` 這個檔案就會觸發,而這個提示沒人能按,就永遠卡住,連錯誤訊息都不會印。**這是一個真的修好的 bug,不是預防性程式碼**:一開始想用手動在使用者機器上建一個全域 `credentials.toml` 來解決,但那樣的話這個 repo 換一台機器/換一個使用者就會重現同樣的卡住,所以改成讓 `run_web.bat` 自己在啟動前檢查、不存在就自動建立空的 `credentials.toml`(內容是 `[general]\nemail = ""`),讓它在任何機器上第一次雙擊都能正常動,不用任何人先手動用終端機跑過一次去回答那個提示。用「先刪掉這個檔案模擬全新機器」的方式驗證過批次檔真的能自己處理好這個情況。
 
 ## 已知的粗糙邊界(還沒處理,不算 bug,是刻意先跳過)
 
@@ -120,3 +129,4 @@ CLAUDE.md「未來規劃方向」列的:
 5. `pyproject.toml` 這輪陸續加了 `jieba>=0.42`、`feedparser>=6.0`、`streamlit>=1.38`(在 `[project.optional-dependencies].ui`,不在預設 `dev` 裡)依賴,如果是全新環境要記得重新 `pip install -e ".[dev]"`(CLI/測試)跟 `pip install -e ".[ui]"`(網頁介面)
 6. 如果要手動測 `add-feed` 又不想真的連網,`feedparser.parse()` 吃本機檔案路徑或原始 XML 字串都可以;這輪也已經用真實網址(BBC News)驗證過連網路徑沒問題
 7. 網頁介面用 `./.venv/Scripts/python.exe -m streamlit run second_brain/interface/web.py` 啟動(或 `.claude/launch.json` 裡的 `second-brain-web` 設定,`preview_start` 可以直接用);如果又要用瀏覽器自動化去驗證,見上面「決策」區塊記錄的工具限制(text_input 用 `computer` 的 type/key 不一定會觸發 rerun,要用 `javascript_tool` 搭配原生 setter + dispatchEvent)
+8. 桌面上有一個「Second Brain.lnk」捷徑指向 [run_web.bat](run_web.bat)(這輪在使用者機器上建的,不在 git 裡);如果要驗證雙擊啟動的行為,記得先刪掉 `%USERPROFILE%\.streamlit\credentials.toml` 模擬全新機器,不然「歡迎訊息卡住」那個 bug 修好了沒有根本測不出來
