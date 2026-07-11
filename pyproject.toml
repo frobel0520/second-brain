@@ -1,0 +1,25 @@
+[project]
+name = "second-brain"
+version = "0.1.0"
+description = "Local-first 個人化知識管理系統"
+requires-python = ">=3.11"
+dependencies = [
+    "typer>=0.12",
+    "chromadb>=0.5",
+    "sentence-transformers>=3.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+]
+
+[project.scripts]
+second-brain = "second_brain.interface.cli:app"
+
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["second_brain*"]
