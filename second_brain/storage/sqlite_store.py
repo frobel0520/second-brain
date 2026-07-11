@@ -17,7 +17,8 @@ CREATE TABLE IF NOT EXISTS documents (
     title TEXT NOT NULL,
     content TEXT NOT NULL,
     created_at TEXT NOT NULL,
-    metadata TEXT NOT NULL
+    metadata TEXT NOT NULL,
+    tags TEXT NOT NULL DEFAULT '[]'
 );
 
 CREATE TABLE IF NOT EXISTS chunks (
@@ -42,8 +43,8 @@ def insert_document(document: Document, chunks: list[Chunk], db_path: Path | Non
     try:
         with conn:
             conn.execute(
-                "INSERT INTO documents (id, source_path, title, content, created_at, metadata) "
-                "VALUES (?, ?, ?, ?, ?, ?)",
+                "INSERT INTO documents (id, source_path, title, content, created_at, metadata, tags) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?)",
                 (
                     document.id,
                     document.source_path,
@@ -51,6 +52,7 @@ def insert_document(document: Document, chunks: list[Chunk], db_path: Path | Non
                     document.content,
                     document.created_at.isoformat(),
                     json.dumps(document.metadata),
+                    json.dumps(document.tags),
                 ),
             )
             conn.executemany(
@@ -72,7 +74,7 @@ def insert_document(document: Document, chunks: list[Chunk], db_path: Path | Non
 
 
 def _row_to_document(row: tuple) -> Document:
-    doc_id, source_path, title, content, created_at, metadata = row
+    doc_id, source_path, title, content, created_at, metadata, tags = row
     return Document(
         id=doc_id,
         source_path=source_path,
@@ -80,6 +82,7 @@ def _row_to_document(row: tuple) -> Document:
         content=content,
         created_at=datetime.fromisoformat(created_at),
         metadata=json.loads(metadata),
+        tags=json.loads(tags),
     )
 
 
@@ -87,7 +90,8 @@ def get_document(document_id: str, db_path: Path | None = None) -> Document | No
     conn = _connect(db_path)
     try:
         row = conn.execute(
-            "SELECT id, source_path, title, content, created_at, metadata FROM documents WHERE id = ?",
+            "SELECT id, source_path, title, content, created_at, metadata, tags FROM documents "
+            "WHERE id = ?",
             (document_id,),
         ).fetchone()
     finally:
@@ -100,7 +104,7 @@ def get_document_by_source_path(source_path: str, db_path: Path | None = None) -
     conn = _connect(db_path)
     try:
         row = conn.execute(
-            "SELECT id, source_path, title, content, created_at, metadata FROM documents "
+            "SELECT id, source_path, title, content, created_at, metadata, tags FROM documents "
             "WHERE source_path = ?",
             (source_path,),
         ).fetchone()
@@ -114,7 +118,7 @@ def get_document_by_content(content: str, db_path: Path | None = None) -> Docume
     conn = _connect(db_path)
     try:
         row = conn.execute(
-            "SELECT id, source_path, title, content, created_at, metadata FROM documents "
+            "SELECT id, source_path, title, content, created_at, metadata, tags FROM documents "
             "WHERE content = ?",
             (content,),
         ).fetchone()
@@ -128,7 +132,7 @@ def list_documents(db_path: Path | None = None) -> list[DocumentSummary]:
     conn = _connect(db_path)
     try:
         rows = conn.execute(
-            "SELECT d.id, d.title, d.source_path, d.created_at, COUNT(c.id) "
+            "SELECT d.id, d.title, d.source_path, d.created_at, d.tags, COUNT(c.id) "
             "FROM documents d LEFT JOIN chunks c ON c.document_id = d.id "
             "GROUP BY d.id ORDER BY d.created_at"
         ).fetchall()
@@ -141,7 +145,8 @@ def list_documents(db_path: Path | None = None) -> list[DocumentSummary]:
             title=row[1],
             source_path=row[2],
             created_at=datetime.fromisoformat(row[3]),
-            chunk_count=row[4],
+            tags=json.loads(row[4]),
+            chunk_count=row[5],
         )
         for row in rows
     ]

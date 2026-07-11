@@ -8,6 +8,7 @@ dependencies = [
     "chromadb>=0.5",
     "sentence-transformers>=3.0",
     "anthropic>=0.40",
+    "jieba>=0.42",
 ]
 
 [project.optional-dependencies]

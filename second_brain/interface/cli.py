@@ -11,6 +11,7 @@ import typer
 from second_brain.ingestion.loader import load_document
 from second_brain.processing.chunking import chunk_document
 from second_brain.processing.embedding import get_embedding_provider
+from second_brain.processing.tagging import get_tagging_provider
 from second_brain.retrieval.ask import ask as run_ask
 from second_brain.retrieval.search import search as run_search
 from second_brain.storage import (
@@ -47,8 +48,10 @@ def add(
     """讀取檔案 → 切塊 → 產生 embedding → 存進 SQLite + ChromaDB。
 
     同一個來源檔案再次 add 會取代舊版本,而不是重複塞進知識庫。
+    加入時會自動用本機關鍵字抽取產生標籤。
     """
     document = load_document(file_path)
+    document.tags = get_tagging_provider().tag(document)
     chunks = chunk_document(document)
 
     if not chunks:
@@ -64,15 +67,17 @@ def add(
 
     save_document(document, chunks)
 
+    tag_suffix = f"  標籤:{', '.join(document.tags)}" if document.tags else ""
+
     if replaced is None:
-        typer.echo(f"已加入「{document.title}」— {len(chunks)} 個片段 ({file_path})")
+        typer.echo(f"已加入「{document.title}」— {len(chunks)} 個片段 ({file_path}){tag_suffix}")
     elif replaced.source_path != document.source_path:
         typer.echo(
             f"偵測到內容跟舊紀錄相同、但路徑變了(原路徑:{replaced.source_path}),"
-            f"視為搬家/改名並取代舊版本 — {len(chunks)} 個片段 ({file_path})"
+            f"視為搬家/改名並取代舊版本 — {len(chunks)} 個片段 ({file_path}){tag_suffix}"
         )
     else:
-        typer.echo(f"已更新「{document.title}」— {len(chunks)} 個片段 ({file_path})")
+        typer.echo(f"已更新「{document.title}」— {len(chunks)} 個片段 ({file_path}){tag_suffix}")
 
 
 @app.command()
@@ -125,7 +130,8 @@ def list_command() -> None:
 
     for document in documents:
         created = document.created_at.strftime("%Y-%m-%d %H:%M")
-        typer.echo(f"{created}  {document.title}  ({document.chunk_count} 個片段)")
+        tag_suffix = f"  [{', '.join(document.tags)}]" if document.tags else ""
+        typer.echo(f"{created}  {document.title}  ({document.chunk_count} 個片段){tag_suffix}")
         typer.echo(f"    {document.source_path}")
 
 
