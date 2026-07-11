@@ -14,6 +14,7 @@ python -m venv .venv
 ./.venv/Scripts/python.exe -m second_brain search "想搜尋的內容"
 ./.venv/Scripts/python.exe -m second_brain ask "想問的問題"
 ./.venv/Scripts/python.exe -m second_brain list
+./.venv/Scripts/python.exe -m second_brain remove path/to/note.md
 ```
 
 第一次執行 `add` 會自動下載 embedding 模型(`all-MiniLM-L6-v2`,約 90MB),之後離線可用。
@@ -36,7 +37,7 @@ second_brain/
 ├── storage/          # SQLite + ChromaDB 讀寫封裝
 │   ├── sqlite_store.py   # metadata / 原文 (SQLite)
 │   ├── vector_store.py   # embedding (ChromaDB, persistent, 本機檔案)
-│   └── store.py          # 對外唯一介面: save_document(), search_similar(), list_documents(), replace_existing_document()
+│   └── store.py          # 對外唯一介面: save_document(), search_similar(), list_documents(), replace_existing_document(), remove_document()
 ├── retrieval/         # 語意搜尋、RAG 問答
 │   ├── search.py         # search(): query 轉 embedding → search_similar()
 │   └── ask.py            # ask(): search() 結果組 context → 呼叫 Anthropic API 做問答
@@ -62,6 +63,7 @@ second_brain/
 | `second-brain search "<query>" [--top-k K]` | ✅ 已實作 | 把 query 轉成向量,語意搜尋,回傳最相關的片段(含來源、分數) |
 | `second-brain ask "<query>" [--top-k K]` | ✅ 已實作 | 在 search 結果基礎上用 Anthropic API(`claude-opus-4-8`)做 RAG 問答,需要 `ANTHROPIC_API_KEY` |
 | `second-brain list` | ✅ 已實作 | 列出知識庫裡目前有哪些文件(標題、片段數、來源路徑) |
+| `second-brain remove <file_path>` | ✅ 已實作 | 從知識庫移除指定檔案的紀錄(sqlite + chroma),不動硬碟上的檔案本身;檔案不用還存在 |
 
 ## 開發
 

@@ -8,10 +8,11 @@
 
 ## 現況一句話
 
-CLAUDE.md 的 MVP(`add` / `search` / `ask`)已經做完,另外多做了一個 `list` 指令
-跟 `add` 的 upsert(重複加入同一個檔案會取代舊版本,不會重複塞)。24 個測試全過,
-git 有兩個 commit(`a53f756` skeleton+add/search、`a02095a` ask),`list`+dedupe
-這批**還沒 commit**。
+CLAUDE.md 的 MVP(`add` / `search` / `ask`)已經做完,另外多做了 `list` 指令、
+`add` 的 upsert(重複加入同一個檔案會取代舊版本,不會重複塞)、跟 `remove` 指令
+(從知識庫刪除指定檔案的紀錄)。26 個測試全過。git 有四個 commit
+(`a53f756` skeleton+add/search、`a02095a` ask、`d72a479` list+upsert、
+本輪新增的 remove commit)。
 
 ## 環境
 
@@ -26,12 +27,13 @@ git 有兩個 commit(`a53f756` skeleton+add/search、`a02095a` ask),`list`+dedup
 
 ## 已經做完的東西
 
-四個 CLI 指令全部能動,架構細節看 [README.md](README.md#架構):
+五個 CLI 指令全部能動,架構細節看 [README.md](README.md#架構):
 
 1. `second-brain add <file>` — 讀 md/txt → 切塊 → embedding(本機 sentence-transformers)→ 存 SQLite + ChromaDB。**同一個 `source_path` 再 add 一次會先刪舊版本再存新的**(`storage/store.py:replace_existing_document`),不是 append。
 2. `second-brain search "<query>" [--top-k K]` — query 轉 embedding → ChromaDB cosine 相似度搜尋 → 印出來源+分數。
 3. `second-brain ask "<query>" [--top-k K]` — 在 search 結果上組 context,呼叫 Anthropic API(`claude-opus-4-8`,寫死在 `config.ANSWER_MODEL`)做 RAG 問答。
-4. `second-brain list` — 列出知識庫裡的文件(標題、片段數、來源路徑),今天(這輪對話)剛加的。
+4. `second-brain list` — 列出知識庫裡的文件(標題、片段數、來源路徑)。
+5. `second-brain remove <file>` — 從知識庫刪除指定檔案的紀錄(sqlite + chroma),不動硬碟上的檔案本身,今天(這輪對話)剛加的。跟 `replace_existing_document` 共用同一個底層刪除邏輯(`storage/store.py:_delete_by_source_path`),差別只在語意跟回傳訊息。`file_path` 參數**沒有** `exists=True`,因為要能刪除已經從硬碟上消失的檔案的舊紀錄。
 
 ## 中途做的非顯而易見的決策(為什麼這樣寫)
 
@@ -45,7 +47,7 @@ git 有兩個 commit(`a53f756` skeleton+add/search、`a02095a` ask),`list`+dedup
 ## 已知的粗糙邊界(還沒處理,不算 bug,是刻意先跳過)
 
 - `add` 的 dedupe 是用**完全比對 resolved absolute path** 判斷是不是「同一個檔案」。檔案改名或搬家會被當成新文件,不會取代舊版本,舊版本也不會自動清掉。
-- 沒有 `second-brain remove <file>` 或清空知識庫的指令,只能手動砍 `data/` 目錄。
+- 沒有清空整個知識庫的指令(`remove` 一次只能刪一個檔案),要全清還是只能手動砍 `data/` 目錄。
 - `list` 沒有分頁,文件一多會洗版(目前用不到分頁,先不做)。
 - `search`/`ask` 的 `top_k` 沒有上限檢查。
 
@@ -57,11 +59,11 @@ CLAUDE.md「未來規劃方向」列的:
 - 自動化處理(自動打標籤、關聯筆記推薦、去重複)
 - Web UI 或 Raycast/Alfred 整合
 
-上面「已知的粗糙邊界」裡列的東西(remove 指令、更聰明的 dedupe)也是候選,但都還沒問過使用者要先做哪個。**下一個對話開始時,建議先問使用者要往哪個方向走**,不要自己選。
+上面「已知的粗糙邊界」裡列的東西(更聰明的 dedupe、清空知識庫指令)也是候選。使用者說這些方向都想做,這輪先挑了 `remove` 指令做(範圍最小、不用連網/API key)。**下一個對話開始時,建議問使用者接下來要做哪個**,不要自己選。
 
 ## 交接檢查清單(接手時建議做的事)
 
-1. `git log --oneline` 確認目前在哪個 commit,`git status` 確認有沒有沒 commit 的東西(這次交接時,`list` + dedupe 這批預期還沒 commit)
-2. `./.venv/Scripts/python.exe -m pytest -q` 應該要 24 個全過、~2 秒內跑完
+1. `git log --oneline` 確認目前在哪個 commit,`git status` 確認有沒有沒 commit 的東西
+2. `./.venv/Scripts/python.exe -m pytest -q` 應該要 26 個全過、~3 秒內跑完
 3. 如果要手動測 `add`/`search`,第一次跑會下載 ~90MB 的 embedding 模型,需要網路
 4. 如果要手動測 `ask`,需要使用者提供 `ANTHROPIC_API_KEY`
