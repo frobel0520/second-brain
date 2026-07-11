@@ -11,6 +11,7 @@ python -m venv .venv
 ./.venv/Scripts/python.exe -m pip install -e ".[dev]"
 
 ./.venv/Scripts/python.exe -m second_brain add path/to/note.md
+./.venv/Scripts/python.exe -m second_brain add-feed https://example.com/feed.xml
 ./.venv/Scripts/python.exe -m second_brain search "想搜尋的內容"
 ./.venv/Scripts/python.exe -m second_brain ask "想問的問題"
 ./.venv/Scripts/python.exe -m second_brain list
@@ -31,7 +32,8 @@ second_brain/
 ├── models.py       # 共用資料結構: Document, Chunk, SearchResult, DocumentSummary
 ├── config.py        # 路徑與參數設定(SQLite/Chroma 路徑、chunk size 等)
 ├── ingestion/        # 資料擷取層 — 讀原始資料 → 轉成 Document
-│   └── loader.py         # 讀 .md / .txt 檔案
+│   ├── loader.py         # 讀 .md / .txt 檔案
+│   └── rss_loader.py      # 讀 RSS/Atom 訂閱來源,一篇文章一個 Document
 ├── processing/       # 清洗、切塊、embedding、自動標籤
 │   ├── chunking.py       # chunk_text() / chunk_document()
 │   ├── embedding.py      # EmbeddingProvider 抽象介面 + SentenceTransformer 實作
@@ -53,6 +55,7 @@ second_brain/
 - `EmbeddingProvider` 是抽象介面,之後要換模型或改用 API 只需新增一個實作
 - `add` 對同一份筆記是 upsert 語意:再次 add 會刪掉舊版本(sqlite + chroma)再存新的,不會重複塞入。判斷「同一份筆記」的邏輯:先比對 `source_path`(內容改了但路徑沒變),找不到再比對 `content` 是否完全相同(路徑變了但內容沒變 —— 例如檔案改名/搬家)
 - `TaggingProvider` 也是抽象介面,之後要換成 LLM 或規則式分類只需新增一個實作;`add` 時會自動呼叫,把標籤存進 `Document.tags`
+- `add` 跟 `add-feed` 共用同一套「標籤 → 切塊 → embedding → 存檔」邏輯(`interface/cli.py:_ingest_document()`),加新的 ingestion 來源只要能產生 `Document`,就自動有標籤/dedupe/embedding,不用重寫這段
 
 資料預設存在 `data/`(已 gitignore):
 - `data/second_brain.db` — SQLite,存文件原文與 metadata
@@ -63,6 +66,7 @@ second_brain/
 | 指令 | 狀態 | 說明 |
 |---|---|---|
 | `second-brain add <file_path>` | ✅ 已實作 | 讀取 markdown/text 檔案 → 自動標籤 → 切塊 → 產生 embedding → 存進 SQLite + ChromaDB |
+| `second-brain add-feed <feed_url> [--limit/-n N]` | ✅ 已實作 | 抓取 RSS/Atom 訂閱來源,每篇文章當一份筆記加入知識庫(預設最多 10 篇) |
 | `second-brain search "<query>" [--top-k K]` | ✅ 已實作 | 把 query 轉成向量,語意搜尋,回傳最相關的片段(含來源、分數) |
 | `second-brain ask "<query>" [--top-k K]` | ✅ 已實作 | 在 search 結果基礎上用 Anthropic API(`claude-opus-4-8`)做 RAG 問答,需要 `ANTHROPIC_API_KEY` |
 | `second-brain list` | ✅ 已實作 | 列出知識庫裡目前有哪些文件(標題、片段數、來源路徑、標籤) |

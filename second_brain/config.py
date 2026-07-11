@@ -15,6 +15,8 @@ CHUNK_OVERLAP = 100
 
 MAX_TAGS = 5
 
+RSS_DEFAULT_LIMIT = 10
+
 ANSWER_MODEL = "claude-opus-4-8"
 
 

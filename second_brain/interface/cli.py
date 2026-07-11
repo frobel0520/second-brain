@@ -8,7 +8,10 @@ from pathlib import Path
 import anthropic
 import typer
 
+from second_brain.config import RSS_DEFAULT_LIMIT
 from second_brain.ingestion.loader import load_document
+from second_brain.ingestion.rss_loader import load_feed
+from second_brain.models import Document
 from second_brain.processing.chunking import chunk_document
 from second_brain.processing.embedding import get_embedding_provider
 from second_brain.processing.tagging import get_tagging_provider
@@ -32,7 +35,39 @@ app = typer.Typer(help="Second Brain — 個人化知識管理系統")
 
 @app.callback()
 def callback() -> None:
-    """add / search / ask / list / remove / clear 六個指令,強制保留子指令的形式。"""
+    """add / add-feed / search / ask / list / remove / clear 七個指令,強制保留子指令的形式。"""
+
+
+def _ingest_document(document: Document) -> str | None:
+    """標籤 → 切塊 → embedding → 存進知識庫,回傳給使用者看的狀態訊息。
+
+    內容是空的話回傳 None,讓呼叫端決定要當成硬錯誤還是略過繼續跑下一篇。
+    """
+    document.tags = get_tagging_provider().tag(document)
+    chunks = chunk_document(document)
+
+    if not chunks:
+        return None
+
+    replaced = replace_existing_document(document.source_path, document.content)
+
+    provider = get_embedding_provider()
+    embeddings = provider.embed([chunk.content for chunk in chunks])
+    for chunk, embedding in zip(chunks, embeddings):
+        chunk.embedding = embedding
+
+    save_document(document, chunks)
+
+    tag_suffix = f"  標籤:{', '.join(document.tags)}" if document.tags else ""
+
+    if replaced is None:
+        return f"已加入「{document.title}」— {len(chunks)} 個片段{tag_suffix}"
+    if replaced.source_path != document.source_path:
+        return (
+            f"偵測到內容跟舊紀錄相同、但路徑變了(原路徑:{replaced.source_path}),"
+            f"視為搬家/改名並取代舊版本 — {len(chunks)} 個片段{tag_suffix}"
+        )
+    return f"已更新「{document.title}」— {len(chunks)} 個片段{tag_suffix}"
 
 
 @app.command()
@@ -51,33 +86,50 @@ def add(
     加入時會自動用本機關鍵字抽取產生標籤。
     """
     document = load_document(file_path)
-    document.tags = get_tagging_provider().tag(document)
-    chunks = chunk_document(document)
+    message = _ingest_document(document)
 
-    if not chunks:
+    if message is None:
         typer.echo("檔案內容是空的,沒有東西可以加入。")
         raise typer.Exit(code=1)
 
-    replaced = replace_existing_document(document.source_path, document.content)
+    typer.echo(f"{message} ({file_path})")
 
-    provider = get_embedding_provider()
-    embeddings = provider.embed([chunk.content for chunk in chunks])
-    for chunk, embedding in zip(chunks, embeddings):
-        chunk.embedding = embedding
 
-    save_document(document, chunks)
+@app.command(name="add-feed")
+def add_feed(
+    feed_url: str = typer.Argument(..., help="RSS/Atom 訂閱網址(也可以是本機 feed 檔案路徑)"),
+    limit: int = typer.Option(
+        RSS_DEFAULT_LIMIT, "--limit", "-n", help="最多處理幾篇文章(依 feed 提供的順序,通常最新的在前面)"
+    ),
+) -> None:
+    """訂閱 RSS/Atom 來源,把裡面的文章當成筆記加入知識庫。
 
-    tag_suffix = f"  標籤:{', '.join(document.tags)}" if document.tags else ""
+    跟 `add` 共用同一套標籤/切塊/embedding/dedupe 邏輯,每篇文章用它的連結
+    當 source_path,再次 add-feed 同一個來源會 upsert,不會重複塞入。
+    """
+    try:
+        documents = load_feed(feed_url, limit=limit)
+    except Exception as error:
+        # feed 抓取/解析失敗的原因很多(網路錯誤、來源網址不是合法 feed…),
+        # 這裡只是 CLI 的錯誤邊界,統一印出來、不特別分類。
+        typer.echo(f"抓取或解析這個訂閱來源失敗:{error}")
+        raise typer.Exit(code=1)
 
-    if replaced is None:
-        typer.echo(f"已加入「{document.title}」— {len(chunks)} 個片段 ({file_path}){tag_suffix}")
-    elif replaced.source_path != document.source_path:
-        typer.echo(
-            f"偵測到內容跟舊紀錄相同、但路徑變了(原路徑:{replaced.source_path}),"
-            f"視為搬家/改名並取代舊版本 — {len(chunks)} 個片段 ({file_path}){tag_suffix}"
-        )
-    else:
-        typer.echo(f"已更新「{document.title}」— {len(chunks)} 個片段 ({file_path}){tag_suffix}")
+    if not documents:
+        typer.echo("這個訂閱來源目前沒有文章可以加入。")
+        raise typer.Exit(code=0)
+
+    added = 0
+    skipped = 0
+    for document in documents:
+        message = _ingest_document(document)
+        if message is None:
+            skipped += 1
+            continue
+        added += 1
+        typer.echo(f"{message} ({document.source_path})")
+
+    typer.echo(f"完成:{added} 篇已處理,{skipped} 篇內容是空的被略過。")
 
 
 @app.command()
