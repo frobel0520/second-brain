@@ -49,3 +49,17 @@ def test_query_similar_ranks_closest_first() -> None:
     assert [m["chunk_id"] for m in matches] == ["c1", "c2"]
     assert matches[0]["content"] == "near"
     assert matches[0]["document_id"] == "d1"
+
+
+def test_delete_chunks_removes_only_given_ids() -> None:
+    chunks = [
+        Chunk(id="c1", document_id="d1", content="a", chunk_index=0, embedding=[0.1, 0.2]),
+        Chunk(id="c2", document_id="d1", content="b", chunk_index=1, embedding=[0.3, 0.4]),
+    ]
+    vector_store.add_chunks(chunks)
+
+    vector_store.delete_chunks(["c1"])
+
+    collection = vector_store._get_collection()
+    assert collection.count() == 1
+    assert collection.get(ids=["c2"])["ids"] == ["c2"]
