@@ -4,42 +4,27 @@
 使用方式看 [README.md](README.md),規劃看 [CLAUDE.md](CLAUDE.md)。這份只記錄
 「現在做到哪、為什麼這樣做、接下來大概要做什麼」,每次做完一個階段性任務就更新。
 
-最後更新:2026-07-12(第七輪)
+最後更新:2026-07-12(第八輪,對話因為 context window 快滿而在這裡交接)
 
 ## 現況一句話
 
 CLAUDE.md 的 MVP 加上這些都做完了:`list`/`remove`/`clear`/`add-feed`/自動
 打標籤/Streamlit 網頁介面/一鍵啟動/feed 訂閱清單(CLI+網頁)/`search`/`ask`
-顯示時間/`remove-batch` 批次刪除(CLI+網頁)。第六輪幫使用者訂閱了 The
-Verge、Hacker News、Simon Willison's Weblog 三個真實 RSS 來源,順便修掉一個
-HN 內容過短導致 dedupe 互撞、資料遺失的 bug(已 commit 進 `5e8e74f` 並
-push)。**這輪(第七輪)使用者提了兩個需求**:(1) 幫已經抓下來的文章加上
-繁體中文翻譯,(2) 時間戳記從 UTC 改成 UTC+8 顯示。
+顯示時間/`remove-batch` 批次刪除(CLI+網頁)/UTC+8 時間顯示/翻譯成繁體中文
+(第七輪,已 commit 進 `60009bb` 並 push)。
 
-**時間戳記**:資料庫繼續存 UTC(沒有改資料),新增 `config.DISPLAY_TIMEZONE`
-(UTC+8),`cli.py`/`web.py` 所有顯示時間的地方(`list`/`search`/`ask`/
-`feeds list`/`remove-batch` 預覽/網頁介面對應位置,共 10 處)都在顯示前
-`.astimezone(DISPLAY_TIMEZONE)`。手動驗證過真實資料轉換正確(UTC 17:45 →
-顯示 01:45 次日,UTC 03:57 → 顯示 11:57 當天)。
-
-**翻譯**:問過使用者兩個設計問題後決定——(1) 現有 40 篇 + 以後新增的都自動
-翻,(2) 另存 `Document.translated_content` 新欄位,原文 `content` 不動
-(不影響 embedding/chunking/search 的語意搜尋品質)。新增
-`processing/translation.py`(`TranslationProvider` 抽象介面 + Anthropic API
-實作,跟 embedding/tagging 同樣的設計慣例),`ingest_document()` 自動嘗試
-翻譯、失敗就靜默跳過不擋 ingestion(`add`/`add-feed`/`feeds` 系列指令本來
-就不需要 API key),新增 `second-brain translate` 指令補翻譯舊文件(這個
-指令反過來,遇到認證失敗會直接停止並清楚回報,不會靜默略過)。SQLite
-schema 用真的 `ALTER TABLE` migration 幫舊資料庫補欄位(這個專案第一次沒有
-要求使用者砍掉資料庫重建)。**這台機器沒有設 `ANTHROPIC_API_KEY`,翻譯功能
-還沒辦法實際跑起來驗證翻譯品質**,只驗證過「沒 key 時優雅降級,不擋
-ingestion/清楚回報」這條路徑,真正的翻譯輸出（繁體中文品質、語氣、格式）
-使用者自己設定 key 之後要自己確認一次。83 個測試全過(新增 11 個涵蓋
-翻譯的 sqlite/pipeline 測試)。**這輪的變更還沒 commit**,下一個對話開始時
-記得先確認要不要 commit + push。**過程中兩次遇到 Streamlit 長時間執行的
-process 快取住舊版 `second_brain.config`/`second_brain.storage` 模組、
-import 新增的名稱失敗,都是重啟 Streamlit 進程解決,不是程式碼問題**,見下面
-決策說明。
+**第八輪沒有改程式碼,做了兩件事**:(1) 使用者回饋第七輪的翻譯功能「其實好像
+還好」,實際閱讀習慣是「想細看的文章再點進去用 Google 自動翻譯」,不需要整個
+知識庫預先批次翻好。問過要不要把翻譯功能整個復原掉,**使用者選擇保留現有
+程式碼跟 schema,不要撤掉**,理由是「未來還是有可能會串 API key 進來」——
+這個功能目前是**做完但先擱置(不會主動去推進),不是沒用要刪掉的東西**,
+之後如果又有人想动它,不用預設要重寫。(2) 使用者問我 hybrid search 具體
+能改善什麼,我用他實際訂閱的內容舉例解釋完(語意搜尋對人名/版本號/專有名詞
+這種精確詞彙容易抓不準,例如 Simon Willison 那篇講 `sqlite-utils` 套件更新的
+筆記,語意搜尋不保證會排在「sqlite-utils」這個查詢的最前面),**使用者聽懂
+且同意,下一輪的任務就是做 hybrid search**。**這輪對話因為 context window
+快滿了,在使用者要求下提前收尾去交接,不是任務做完了才停**,下一輪從
+「開始實作 hybrid search」接著做,不用再問方向。
 
 ## 環境
 
@@ -172,10 +157,38 @@ CLAUDE.md「未來規劃方向」列的:
 - 自動化處理的其餘部分(關聯筆記推薦、去重複——自動打標籤這一小塊已經做完)
 - Web UI 或 Raycast/Alfred 整合(**Streamlit 網頁介面已經做完基本版,而且使用者本人已經用過**,如果要往「多人使用」或更精緻互動的方向,可能要考慮換成正式 web app)
 
-使用者說這些方向都想做,已經照優先順序做完 `remove` → 「更聰明的 dedupe」+「清空知識庫指令」→ 「自動打標籤(殼)」→ 「RSS ingestion」→ 「Streamlit 網頁介面」→「一鍵啟動」→ 「feed 訂閱清單(CLI)」→ 「feed 訂閱清單補進網頁介面」→ 「search/ask 顯示時間 + remove-batch 批次刪除(CLI)」→ 「remove-batch 補進網頁介面」(第五輪)→ 「訂閱真實 RSS 來源」(第六輪)→ **「翻譯成繁體中文 + 時間戳記改 UTC+8」(第七輪,使用者直接提的需求)**。**下一個對話開始時,建議問使用者接下來要做哪個**,不要自己選,除非使用者又直接提了具體需求。**hybrid search 連續三輪都排在候選最前面但沒被選**,不代表使用者不想做,可以考慮下次直接主動問「要不要做 hybrid search 了」而不是每次都列一長串候選。
+使用者說這些方向都想做,已經照優先順序做完 `remove` → 「更聰明的 dedupe」+「清空知識庫指令」→ 「自動打標籤(殼)」→ 「RSS ingestion」→ 「Streamlit 網頁介面」→「一鍵啟動」→ 「feed 訂閱清單(CLI)」→ 「feed 訂閱清單補進網頁介面」→ 「search/ask 顯示時間 + remove-batch 批次刪除(CLI)」→ 「remove-batch 補進網頁介面」(第五輪)→ 「訂閱真實 RSS 來源」(第六輪)→ 「翻譯成繁體中文 + 時間戳記改 UTC+8」(第七輪)。
 
-候選(不代表優先順序):
-- **Hybrid search**:目前 `search`/`ask` 只有語意搜尋(向量相似度),對精確詞彙查詢(人名、專有名詞)通常不如關鍵字搜尋準。加關鍵字 + 語意並用,會直接讓所有既有筆記的搜尋品質提升,不像新 ingestion 來源那樣只影響新加的內容。
+## 下一輪要做的事:Hybrid Search
+
+**這不是候選,是已經確定的下一步**——第八輪問過使用者「要不要做」,解釋完
+具體能改善什麼之後使用者同意了,**下一輪對話開始時直接進實作,不用再問
+方向**。
+
+**問題**:目前 `search`/`ask` 只有語意搜尋(向量相似度,`processing/embedding.py`
+的 `SentenceTransformerEmbeddingProvider`,`all-MiniLM-L6-v2` 模型)。對「概念
+相關」的查詢很準,但對精確詞彙(人名、專有名詞、版本號、特定套件名稱)容易
+抓不準——跟使用者解釋時舉的例子是 Simon Willison 那篇講 `sqlite-utils` 套件
+更新的筆記,搜尋「sqlite-utils」這個精確字串時,語意搜尋不保證會排在最前面。
+
+**使用者同意的方向**:語意搜尋(現有)+ 關鍵字搜尋兩種一起跑,結果加權合併。
+**還沒跟使用者確認的實作細節**(下一輪開始時要邊做邊定,不是已經拍板的規格):
+- 關鍵字搜尋用什麼實作:討論時提過 `rank_bm25`(純 Python、本機執行、免
+  API key,符合 local-first 原則),但還沒真的裝過、也還沒問過使用者要不要
+  用這個套件——開始實作前應該先確認一下,或至少讓使用者知道會多一個依賴。
+- 兩種分數怎麼加權合併(簡單加總?正規化後加權?)沒有討論過細節。
+- BM25 需要一份可以查詢的語料(所有 chunk 的文字),要確認是每次查詢即時
+  從 SQLite 撈,還是要另外維護一份索引——SQLite 裡 `chunks.content` 已經有
+  資料,現有 chunk 數量(幾十篇文章、可能一兩百個 chunk)量體很小,即時掃
+  應該就夠,不用先假設需要額外的索引結構。
+- `search()`/`ask()` 的對外介面(CLI/網頁介面的呼叫方式)應該不用變,這是
+  純粹換掉 `retrieval/search.py` 內部的排序邏輯,不是新增指令。
+
+**下一輪開始前建議**:先讀這份筆記的「已經做完的東西」跟「中途做的決策」
+兩節,了解現有 `search`/`SearchResult`/`retrieval/search.py` 的介面設計,
+再決定怎麼加關鍵字搜尋這一層,不要憑空重新設計。
+
+候選(不代表優先順序,hybrid search 做完之後可以再從這裡選):
 - 更多 ingestion 來源(瀏覽器書籤、Readwise/Instapaper、Obsidian/Notion 匯出)。
 - **YouTube 頻道 RSS**:對話中討論過,使用者問過但決定「先不做」。要注意的是 YouTube 頻道 RSS 只有標題+短描述,**沒有逐字稿**,能做的頂多是「新影片書籤」,不是「影片內容知識庫」;如果之後想做後者,得另外接字幕/逐字稿的來源,不是單純的 RSS ingestion 可以解決的,下次有人提這個要先講清楚這個限制。
 - 關聯筆記推薦、去重複。
@@ -185,7 +198,7 @@ CLAUDE.md「未來規劃方向」列的:
 
 ## 交接檢查清單(接手時建議做的事)
 
-1. `git log --oneline` 確認目前在哪個 commit,`git status --short --branch` 確認有沒有沒 commit 的東西、有沒有 `ahead`/`behind` origin(這次交接時,**第七輪:翻譯功能 + UTC+8 時間顯示,這批預期還沒 commit/push**;第六輪的 HN dedupe 修復已經 commit 進 `5e8e74f` 並 push 了,第五輪 `19f9994`,第四輪 `5669b07`,第二、三輪分別是 `302939b`/`e12d091`)。
+1. `git log --oneline` 確認目前在哪個 commit,`git status --short --branch` 確認有沒有沒 commit 的東西、有沒有 `ahead`/`behind` origin(這次交接時,**程式碼全部都已經 commit 進 `60009bb` 並 push 上 `origin/master` 了,工作目錄應該是乾淨的**——第八輪沒有改任何程式碼,只有這份 Progress.md 可能還沒 commit,視交接當下狀態而定,先看一下)。
 2. **知識庫裡現在有真實資料**:第六輪幫使用者訂閱了三個真實 RSS 來源(The Verge、Hacker News、Simon Willison's Weblog),`data/second_brain.db`/`data/chroma/` 不是空的測試資料,手動測試/除錯時要小心別誤刪這些真實訂閱或文章(用 `remove-batch`/`clear` 之前務必先 `list`/`feeds list` 確認)。
 3. **這台機器沒有設 `ANTHROPIC_API_KEY`**:`ask`/`translate` 都還沒被使用者實際跑過,`second-brain translate` 目前只驗證過「沒 key 時清楚報錯退出」這條路徑,還沒驗證過真的翻譯品質。使用者設定 key 之後,建議提醒他跑一次 `second-brain translate` 幫現有 40 幾篇文章補翻譯,並抽查幾篇品質。
 4. `./.venv/Scripts/python.exe -m pytest -q` 應該要 83 個全過、~5 秒內跑完
