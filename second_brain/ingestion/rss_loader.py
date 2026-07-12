@@ -11,6 +11,12 @@ from second_brain.models import Document
 
 _TAG_RE = re.compile(r"<[^>]+>")
 
+# 有些 feed(例如 Hacker News)的 description 只有「Comments」這種佔位文字,
+# 不是真正的文章內容。太短的內容當 dedupe 比對基準會讓不同文章互相誤判成
+# 「同一篇改名」(見 storage/store.py:replace_existing_document 的內容比對
+# fallback),所以內容太短就退回用標題,至少同一批裡不會互相撞在一起。
+_MIN_CONTENT_LENGTH = 20
+
 
 def load_feed(feed_url: str, limit: int | None = None) -> list[Document]:
     """抓取並解析 RSS/Atom 來源,每篇文章轉成一個 Document。
@@ -41,6 +47,8 @@ def _entry_to_document(entry: Any) -> Document:
     link = entry.get("link") or entry.get("id") or str(uuid.uuid4())
     title = entry.get("title", "").strip() or link
     content = _strip_html(_extract_raw_content(entry))
+    if len(content) < _MIN_CONTENT_LENGTH:
+        content = title
 
     return Document(
         id=str(uuid.uuid4()),

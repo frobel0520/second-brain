@@ -79,6 +79,7 @@ second_brain/
 - **`remove-batch` 的日期/關鍵字/來源三個條件是 OR,不是 AND**:`storage/sqlite_store.py:find_documents()` 把有給的條件各自組成一段 SQL 子句,再用 `OR` 串起來;`--after`/`--before` 兩個一起給是例外,彼此是 `AND`(定義一段日期區間),這段區間本身再跟其他條件用 `OR`。跟 `clear` 一樣,刪除前會列出符合項目並要求確認(`--yes` 可跳過)。**網頁介面「瀏覽」分頁下方的批次刪除區塊是同一套 `find_documents()`/`remove_documents()`**,兩邊條件語意完全一致;網頁版用「預覽→勾選確認→刪除」兩步驟代替 CLI 的互動式 `[y/N]` 提示,「刪除這些文件」按鈕要先勾選確認 checkbox 才會出現
 - **`documents.tags`/`metadata` 這兩個 JSON 欄位存的時候要用 `json.dumps(..., ensure_ascii=False)`**,不能用預設值:預設 `ensure_ascii=True` 會把中文字轉成 `\uXXXX` 跳脫序列存進 SQLite,`find_documents()` 用 `LIKE` 對 `tags` 欄位做關鍵字比對時完全比對不到中文標籤。這個修正只影響「之後新寫入」的資料;**這次修正之前就已經存在的舊資料,`tags` 欄位仍是 ASCII 跳脫格式**,要重新 `add`/`feeds sync` 過一次才會用新格式存,`remove-batch --keyword` 在那之前對舊資料的標籤比對不到(標題/內容欄位本來就是純文字,不受影響)
 - `interface/` 底下的 `cli.py` 跟 `web.py` 是同一組核心邏輯的兩種操作介面,兩者都不直接碰 SQLite/ChromaDB,一律透過 `storage`/`retrieval`/`ingestion.pipeline` 的介面
+- **`rss_loader.py` 對太短的 RSS description 會退回用標題當內容**:像 Hacker News 這種來源,`<description>` 只有「Comments」這種佔位文字,不是真正的文章內容。如果直接拿這種內容當 `add` 的 dedupe 比對基準(見上面的「同一份筆記」判斷邏輯),同一批裡好幾篇文章會因為內容完全相同(都是「Comments」)被誤判成「同一篇改名」,一篇篇疊代覆蓋掉——實測訂閱 Hacker News 時 5 篇文章最後只剩 1 篇存活。修法:內容長度低於 `rss_loader._MIN_CONTENT_LENGTH`(20 字)就用標題取代,標題天生就跟其他文章不同,不會互撞。
 
 資料預設存在 `data/`(已 gitignore):
 - `data/second_brain.db` — SQLite,存文件原文與 metadata

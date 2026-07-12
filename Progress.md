@@ -4,33 +4,34 @@
 使用方式看 [README.md](README.md),規劃看 [CLAUDE.md](CLAUDE.md)。這份只記錄
 「現在做到哪、為什麼這樣做、接下來大概要做什麼」,每次做完一個階段性任務就更新。
 
-最後更新:2026-07-12(第五輪)
+最後更新:2026-07-12(第六輪)
 
 ## 現況一句話
 
-CLAUDE.md 的 MVP(`add` / `search` / `ask`)已經做完,另外多做了 `list`、
-`remove`、`clear`、`add-feed`(RSS/Atom ingestion)、自動打標籤、Streamlit
-網頁介面、一鍵啟動、feed 訂閱清單(CLI + 網頁介面)、`search`/`ask` 顯示時間、
-`remove-batch` 批次刪除(CLI 版,第四輪做的)。**這輪(第五輪)把批次刪除也
-補進網頁介面**:使用者去前端檢查完(確認第三輪做的訂閱清單沒問題),回報
-「找不到批次刪除的地方,只看到每篇文章右上角的單筆刪除按鈕」,問過使用者
-要不要加、選了要加,在「瀏覽」分頁下方加了一個批次刪除區塊(日期範圍/關鍵字/
-來源篩選 → 預覽符合項目 → 勾選確認 → 刪除),底層直接呼叫跟 CLI 版
-`remove-batch` 同一組 `find_documents()`/`remove_documents()`。過程中踩到
-三個瀏覽器自動化的坑(不是產品程式碼的 bug,但**有一個真的產品 bug**混在
-裡面,見下面決策說明):(1) 一開始把批次刪除包在 `st.expander()` 裡,但
-`st.expander()` 沒有 `expanded=True` 的話,每次欄位失焦觸發 rerun 都會自動
-收合,導致填表單填到一半整個區塊自己關起來——**這是真的會發生的產品 bug,
-已修好**(拿掉 expander,固定顯示);(2) 這次 `form_input` 工具沒辦法讓
-Streamlit 的 `text_input` 真的收到新值(DOM 值有改,但 Python 端讀到空字串),
-要改用 `computer` 的 `triple_click` 選取 + `type` 真的鍵盤輸入;(3) Streamlit
-的 `st.checkbox` 用 react-aria 做無障礙處理,真正的 `<input type="checkbox">`
-是視覺隱藏的(`clip-path` 裁掉),直接點擊/`.click()` 都不會觸發,要點擊外層
-`<label>` 才會正確委派事件。71 個測試全過(這次沒加新測試,重用第四輪已測過的
-`find_documents()`/`remove_documents()`,靠瀏覽器手動跑完整流程驗證,含真的
-刪除兩篇測試文件成功)。**第四輪的東西已經 commit(`5669b07`)且 push 上
-`origin/master` 了**(`d72a479..5669b07`),**這輪(第五輪)的網頁批次刪除
-還沒 commit**,下一個對話開始時記得先確認要不要 commit + push。
+CLAUDE.md 的 MVP 加上這些都做完了:`list`/`remove`/`clear`/`add-feed`/自動
+打標籤/Streamlit 網頁介面/一鍵啟動/feed 訂閱清單(CLI+網頁)/`search`/`ask`
+顯示時間/`remove-batch` 批次刪除(CLI+網頁)。第五輪的網頁批次刪除已經
+commit(`19f9994`)並 push 上 `origin/master` 了。**這輪(第六輪)不是新功能,
+是實際使用這個知識庫**:使用者請我找科技業相關、能用 RSS 抓的電子報,我先
+搜尋+用 `get_feed_title()` 實測驗證了 10 個候選網址的可用性(TechCrunch/The
+Verge/Ars Technica/Wired/MIT Technology Review/IEEE Spectrum/Hacker News/
+Simon Willison's Weblog/The Pragmatic Engineer/JavaScript Weekly,全部驗證
+過真的能解析),整理成內容/風格對照表給使用者挑,使用者選了 The Verge、
+Hacker News、Simon Willison's Weblog 三個,用 `feeds add` 幫忙訂閱。
+
+**訂閱 Hacker News 時意外踩到、也修掉一個真的會造成資料遺失的 bug**:HN 的
+RSS `<description>` 對每一篇文章都只有「Comments」這幾個字(不是真正的文章
+摘要),而 `add`/`ingest_document` 既有的 dedupe 邏輯在「同路徑找不到,退回比對
+內容是否完全相同」這一步,會把同一批裡所有內容都是「Comments」的文章互相
+誤判成「同一篇改名」,一篇篇疊代覆蓋——實測 5 篇 HN 文章最後**只剩最後處理
+的 1 篇存活,其他 4 篇被靜默蓋掉,沒有任何錯誤訊息**。已經在
+`rss_loader.py` 修好(內容長度低於 20 字就退回用標題當內容,標題天生就不會
+互撞),加了測試,清掉損毀的舊資料後重新 `feeds sync` 一次,確認 10 篇 HN
+文章全部正確、各自獨立地存進去了。72 個測試全過(新增 1 個涵蓋這個 fallback
+的測試)。**這輪的 `rss_loader.py` 修復還沒 commit**,使用者實際訂閱到的
+三個來源(The Verge/Hacker News/Simon Willison's Weblog)資料已經在本機
+知識庫裡,不影響 commit 與否——但這個 bug 修復本身應該要進 git,下一個對話
+開始時記得先確認要不要 commit + push。
 
 ## 環境
 
@@ -122,6 +123,7 @@ Streamlit 的 `text_input` 真的收到新值(DOM 值有改,但 Python 端讀到
 - **第五輪(真的會壞掉的 bug):`st.expander()` 沒設 `expanded=True` 的話,每次欄位失焦觸發 rerun 就會自動收合**:一開始把批次刪除的表單包在 `st.expander("批次刪除")` 裡(想法是預設收起來、不要一直佔畫面)。手動測試填表單時發現:填完「關鍵字」欄位、游標移到「來源」欄位觸發 blur → Streamlit rerun → **`st.expander()` 預設是每次重跑都重新算 collapsed 狀態,不會記住使用者剛剛手動展開過**,整個區塊自己關起來,使用者填到一半東西就消失,完全無法正常使用。**這是真的會發生的 bug,不是預防性修改**(用 Claude Browser pane 實測到表單「自己關起來」)。**修法**:拿掉 `expander`,批次刪除區塊直接固定顯示在「瀏覽」分頁最下面(用 `st.divider()` + `st.subheader()` 分隔,跟頁面其他區塊風格一致)。**教訓**:Streamlit 的 `expander`/類似「可摺疊」元件,只要底下有任何會觸發 rerun 的互動元件(text_input 的 blur、date_input 的選擇……),沒有額外用 session_state 記住展開狀態的話,預設行為就是每次 rerun 都摺疊回去——這個專案目前唯一一處用到 `expander` 就踩到這個坑,以後這個專案裡應該避免在會員互動的表單外面包 `expander`,除非額外處理展開狀態的持久化。
 - **第五輪:`form_input` 工具這次對 Streamlit 的 `text_input` 沒有效果,DOM 值改了但 Python 端讀不到**:這輪重新測試批次刪除的關鍵字欄位時,先用 `form_input` 設值,`javascript_tool` 直接查 DOM 確認值真的寫進去了(`el.value` 印出來是對的),但點擊「預覽符合的文件」後 Streamlit 端印出「至少要給一個篩選條件」——代表 Python 端的 `st.text_input()` 讀到的還是空字串,`form_input` 的原生 setter 沒有觸發 Streamlit React 元件真正監聽的事件。**跟上一輪(第三輪)的結論不完全一樣**:第三輪筆記寫「`form_input` + 點別的欄位觸發 blur」有效,這輪同樣的組合卻沒用——**不確定原因是不同元件實例的差異還是环境本身不穩定,先記錄「這個工具在這個專案的 Streamlit 元件上不可靠」這個結論,不要再假設它一定有效**。**最後真的有效的作法**:改用 `computer` 工具的 `triple_click`(選取欄位既有文字)+ `type`(真的鍵盤輸入,不是 DOM setter)+ 按 `Enter` 或點別的地方觸發 blur。**以後在這個專案測 Streamlit 文字輸入,優先用 `computer` 的 triple_click+type,不要優先嘗試 `form_input`**,可以省掉來回除錯的時間。
 - **第五輪:Streamlit 的 `st.checkbox` 用 react-aria 做無障礙處理,真正的 `<input type="checkbox">` 被 `clip-path` 視覺隱藏,直接點擊/`.click()` 都不會觸發**:用 `read_page` 拿到的 checkbox ref 定位去點,或用 `javascript_tool` 對 input 元素本身呼叫 `.click()`,DOM 的 `checked` 屬性都沒有變化,Python 端的 `st.checkbox()` 也讀不到勾選狀態。查了 DOM 結構才發現真正的 `<input>` 包在一個 `clip-path: inset(50%)` 的 `<span>` 裡(視覺上完全隱藏,只留給螢幕閱讀器用),畫面上看到的方框圖示是另一個 `aria-hidden` 的裝飾元素,不是可互動的 DOM 節點。**有效的作法**:用 `javascript_tool` 找到 checkbox 的 `closest('label')`,對這個 `<label>` 呼叫 `.click()`——HTML 原生的 `<label>` 點擊會自動委派給它包住的表單元件並觸發正常的 `click`/`change` 事件,這是瀏覽器原生行為,不受 react-aria 的自訂事件處理影響。**以後在這個專案測 Streamlit checkbox,直接跳過點 input/point 座標這條路,用 JS 點 `label` 元素**。
+- **第六輪(真的會造成資料遺失的 bug):RSS 來源的內容太短時,dedupe 邏輯會把不同文章互相誤判成「同一篇改名」**:訂閱 Hacker News 時發現 5 篇文章 `feeds add` 完只剩 1 篇存活。追根究底是 HN 的 RSS `<description>` 對每篇文章都只放「Comments」這幾個字(連到討論串的佔位文字,不是文章摘要),`ingest_document()` 的 dedupe(`storage/store.py:replace_existing_document`)在「同路徑找不到」時會退回比對 `content` 是否完全相同——同一批次裡每篇 HN 文章的 `content` 都是一模一樣的「Comments」,所以每加一篇新的,就會被判定成「跟前一篇是同一份筆記改名」,把前一篇的資料整個取代掉,如此連環覆蓋,一批 N 篇最後只剩 1 篇。**這個 bug 不是這次新出現的——從 `add-feed`/`feeds` 系列指令一開始做出來就存在,只是先前測試用的 BBC 新聞/自己寫的測試筆記,內容都夠長夠獨特,沒有踩到過**;這次是實際訂閱一個「description 天生很短」的真實來源才第一次暴露出來,再次印證「用真實資料測試比自己編的測試資料更容易發現邊界案例」這個之前已經在 RSS ingestion 那輪學到的教訓。**修法**:`rss_loader.py` 新增 `_MIN_CONTENT_LENGTH = 20`,`_entry_to_document()` 抽出來的內容如果比這個短,就退回用文章標題當內容——標題天生逐篇不同,不會互撞,同時也不用去改共用的 `replace_existing_document()` dedupe 邏輯(那段邏輯服務所有 ingestion 來源,是共用機制,改了影響面太廣,問題其實出在「餵給它的內容太廉價/太短」這個上游,修上游比較安全)。**已經清掉損毀的舊資料(單獨存活的那篇 HN 文章)、重新 `feeds sync` 一次,確認 10 篇 HN 文章這次全部正確分開存進去了**。**這個修法的已知限制**:HN 這類「RSS 沒有真正內容,只有標題+連結」的來源,存進知識庫的筆記內容永遠只有標題本身,不會有摘要或全文——這是 HN RSS 設計本身的限制,不是這個修法能解決的,`search`/`ask` 對這類筆記的語意搜尋品質會比有完整內容的筆記差(可搜尋的文字只有標題那幾個字)。
 
 ## 已知的粗糙邊界(還沒處理,不算 bug,是刻意先跳過)
 
@@ -142,6 +144,7 @@ Streamlit 的 `text_input` 真的收到新值(DOM 值有改,但 Python 端讀到
 - **第五輪:網頁介面批次刪除的「預覽符合的文件」結果存在 `st.session_state`,切換分頁或做其他操作不會自動清掉**,如果使用者預覽完之後跑去別的分頁刪了某篇筆記、又切回來直接勾確認刪除,實際刪除時是照「當初預覽的那份清單」執行(`remove_documents()` 用的是預覽當下記下的 id 列表),已經被刪掉的 id 會被 `remove_documents()` 靜默略過(`sqlite_store.get_document(id)` 找不到就跳過,不會報錯),不會導致誤刪別的東西,但如果知識庫在預覽之後有新增符合條件的文件,不會自動出現在待刪清單裡,要重新按一次「預覽符合的文件」才會抓到最新結果。
 - **第四輪:`remove-batch` 的 `--after`/`--before` 只支援 `YYYY-MM-DD` 絕對日期,沒有「N 天前」這種相對日期的簡寫**,要刪「30 天前的文章」得自己算出日期字串。之後如果常用可以加 `--older-than-days N` 這種語法糖,MVP 先不做。
 - **第四輪:`remove-batch --keyword` 對這次修正之前就存在的舊資料,標籤比對不到中文**(`tags` 欄位還是舊的 `ensure_ascii=True` 跳脫格式),標題/內容欄位不受影響。見上面「決策」段落的詳細說明,要嘛重新 `add`/`feeds sync`,要嘛之後寫一次性 migration script。
+- **第六輪:Hacker News 這類「description 只有佔位文字」的 RSS 來源,存進知識庫的筆記內容永遠只有標題**,沒有摘要或全文,`search`/`ask` 對這些筆記的語意搜尋品質會比有完整內容的來源(例如 BBC News、The Verge)差,可搜尋的文字量很少。這是 HN RSS 設計本身的限制,不是 bug,已知先接受。
 
 ## 接下來可能的方向(還沒決定)
 
@@ -151,7 +154,7 @@ CLAUDE.md「未來規劃方向」列的:
 - 自動化處理的其餘部分(關聯筆記推薦、去重複——自動打標籤這一小塊已經做完)
 - Web UI 或 Raycast/Alfred 整合(**Streamlit 網頁介面已經做完基本版,而且使用者本人已經用過**,如果要往「多人使用」或更精緻互動的方向,可能要考慮換成正式 web app)
 
-使用者說這些方向都想做,已經照優先順序做完 `remove` → 「更聰明的 dedupe」+「清空知識庫指令」→ 「自動打標籤(殼)」→ 「RSS ingestion」→ 「Streamlit 網頁介面」→「一鍵啟動」→ 「feed 訂閱清單(CLI)」→ 「feed 訂閱清單補進網頁介面」→ 「search/ask 顯示時間 + remove-batch 批次刪除(CLI)」→ **「remove-batch 補進網頁介面」(第五輪,使用者去前端檢查後回報缺口,問過要不要加、選了要加)**。**下一個對話開始時,建議問使用者接下來要做哪個**,不要自己選,除非使用者又直接提了具體需求。**hybrid search 還沒做,連續三輪都排在候選最前面,但使用者連續三輪都選了別的**,不代表使用者不想做,只是還沒排到,不要因為連續沒被選就自己降低它的排序,但也可以考慮下次直接主動問「要不要做 hybrid search 了」而不是每次都列一長串候選。
+使用者說這些方向都想做,已經照優先順序做完 `remove` → 「更聰明的 dedupe」+「清空知識庫指令」→ 「自動打標籤(殼)」→ 「RSS ingestion」→ 「Streamlit 網頁介面」→「一鍵啟動」→ 「feed 訂閱清單(CLI)」→ 「feed 訂閱清單補進網頁介面」→ 「search/ask 顯示時間 + remove-batch 批次刪除(CLI)」→ 「remove-batch 補進網頁介面」(第五輪)。**第六輪不是新功能開發,是使用者第一次真的拿這個工具來用**:請我找科技業 RSS 來源、訂閱了三個,順便暴露並修掉一個既有的 dedupe bug(見上面決策說明)。**下一個對話開始時,建議問使用者接下來要做哪個**,不要自己選,除非使用者又直接提了具體需求。**hybrid search 連續三輪都排在候選最前面但沒被選**,不代表使用者不想做,可以考慮下次直接主動問「要不要做 hybrid search 了」而不是每次都列一長串候選。
 
 候選(不代表優先順序):
 - **Hybrid search**:目前 `search`/`ask` 只有語意搜尋(向量相似度),對精確詞彙查詢(人名、專有名詞)通常不如關鍵字搜尋準。加關鍵字 + 語意並用,會直接讓所有既有筆記的搜尋品質提升,不像新 ingestion 來源那樣只影響新加的內容。
@@ -164,11 +167,12 @@ CLAUDE.md「未來規劃方向」列的:
 
 ## 交接檢查清單(接手時建議做的事)
 
-1. `git log --oneline` 確認目前在哪個 commit,`git status --short --branch` 確認有沒有沒 commit 的東西、有沒有 `ahead`/`behind` origin(這次交接時,**第五輪:網頁介面批次刪除,這批預期還沒 commit/push**;第四輪的 search/ask 顯示時間 + `remove-batch` CLI + tags 編碼修復已經 commit 進 `5669b07` 並 push 上 `origin/master` 了,第二、三輪的 feed 訂閱清單分別是 `302939b`/`e12d091`)。
-2. `./.venv/Scripts/python.exe -m pytest -q` 應該要 71 個全過、~5 秒內跑完
-3. 如果要手動測 `add`/`search`,第一次跑會下載 ~90MB 的 embedding 模型,需要網路;jieba 第一次執行也會在本機建 prefix dict 快取(不用連網,純本機運算,第一次會慢個零點幾秒)
-4. 如果要手動測 `ask`,需要使用者提供 `ANTHROPIC_API_KEY`(這台機器目前沒設,使用者已經知道怎麼設定,是自己的事,不用主動催)
-5. `pyproject.toml` 這輪陸續加了 `jieba>=0.42`、`feedparser>=6.0`、`streamlit>=1.38`(在 `[project.optional-dependencies].ui`,不在預設 `dev` 裡)依賴,如果是全新環境要記得重新 `pip install -e ".[dev]"`(CLI/測試)跟 `pip install -e ".[ui]"`(網頁介面)
-6. 如果要手動測 `add-feed` 又不想真的連網,`feedparser.parse()` 吃本機檔案路徑或原始 XML 字串都可以;這輪也已經用真實網址(BBC News 英文版)驗證過連網路徑沒問題,是使用者自己驗證的
-7. 開始功能表有一個「Second Brain」捷徑指向 [run_web.bat](run_web.bat)(這輪在使用者機器上建的,不在 git 裡,取代了原本刪掉的桌面捷徑);如果要驗證雙擊啟動的行為,記得先刪掉 `%USERPROFILE%\.streamlit\credentials.toml` 模擬全新機器,不然「歡迎訊息卡住」那個 bug 修好了沒有根本測不出來
-8. 如果要用瀏覽器自動化測 Streamlit 網頁介面,見「中途做的決策」裡記錄的工具限制(text_input 用 `computer` 的 type/key 不一定會觸發 rerun,要用 `javascript_tool` 搭配原生 setter + dispatchEvent)
+1. `git log --oneline` 確認目前在哪個 commit,`git status --short --branch` 確認有沒有沒 commit 的東西、有沒有 `ahead`/`behind` origin(這次交接時,**第六輪:`rss_loader.py` 的內容過短 fallback 修復,這批預期還沒 commit/push**;第五輪的網頁批次刪除已經 commit 進 `19f9994` 並 push 了,第四輪 `5669b07`,第二、三輪分別是 `302939b`/`e12d091`)。
+2. **知識庫裡現在有真實資料**:第六輪幫使用者訂閱了三個真實 RSS 來源(The Verge、Hacker News、Simon Willison's Weblog),`data/second_brain.db`/`data/chroma/` 不是空的測試資料,手動測試/除錯時要小心別誤刪這些真實訂閱或文章(用 `remove-batch`/`clear` 之前務必先 `list`/`feeds list` 確認)。
+3. `./.venv/Scripts/python.exe -m pytest -q` 應該要 72 個全過、~5 秒內跑完
+4. 如果要手動測 `add`/`search`,第一次跑會下載 ~90MB 的 embedding 模型,需要網路;jieba 第一次執行也會在本機建 prefix dict 快取(不用連網,純本機運算,第一次會慢個零點幾秒)
+5. 如果要手動測 `ask`,需要使用者提供 `ANTHROPIC_API_KEY`(這台機器目前沒設,使用者已經知道怎麼設定,是自己的事,不用主動催)
+6. `pyproject.toml` 這輪陸續加了 `jieba>=0.42`、`feedparser>=6.0`、`streamlit>=1.38`(在 `[project.optional-dependencies].ui`,不在預設 `dev` 裡)依賴,如果是全新環境要記得重新 `pip install -e ".[dev]"`(CLI/測試)跟 `pip install -e ".[ui]"`(網頁介面)
+7. 如果要手動測 `add-feed`/`feeds add` 又不想真的連網,`feedparser.parse()` 吃本機檔案路徑或原始 XML 字串都可以;這輪也已經用多個真實網址(BBC News、The Verge、Hacker News、Simon Willison's Weblog)驗證過連網路徑沒問題
+8. 開始功能表有一個「Second Brain」捷徑指向 [run_web.bat](run_web.bat)(這輪在使用者機器上建的,不在 git 裡,取代了原本刪掉的桌面捷徑);如果要驗證雙擊啟動的行為,記得先刪掉 `%USERPROFILE%\.streamlit\credentials.toml` 模擬全新機器,不然「歡迎訊息卡住」那個 bug 修好了沒有根本測不出來
+9. 如果要用瀏覽器自動化測 Streamlit 網頁介面,見「中途做的決策」裡記錄的多筆工具限制筆記(text_input 優先用 `computer` 的 triple_click+type,checkbox 要用 JS 點 `label` 元素,`expander` 沒設 `expanded=True` 會每次 rerun 自動收合)
