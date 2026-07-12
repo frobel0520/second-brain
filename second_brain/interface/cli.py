@@ -226,10 +226,30 @@ def feeds_set_category(
     typer.echo(f"已把「{updated.name}」的分類設為「{category}」(只影響之後同步的新文章)")
 
 
+def _format_sync_log_line(results: list[FeedSyncResult]) -> str:
+    """把這次同步所有來源的結果彙整成一行,給 `--log-file` 寫檔用。
+
+    只給彙總數字(不像 `_format_feed_sync_result` 逐來源印出來),失敗的來源
+    額外列出名稱+原因,方便之後回頭查「昨天同步到底發生了什麼」。
+    """
+    total_added = sum(result.added for result in results)
+    total_updated = sum(result.updated for result in results)
+    failures = [result for result in results if result.error is not None]
+
+    timestamp = datetime.now(DISPLAY_TIMEZONE).strftime("%Y-%m-%d %H:%M:%S")
+    line = f"{timestamp}  新增 {total_added} 篇、更新 {total_updated} 篇、失敗 {len(failures)} 個來源"
+    if failures:
+        line += ":" + "、".join(f"{result.feed.name} 同步失敗:{result.error}" for result in failures)
+    return line
+
+
 @feeds_app.command("sync")
 def feeds_sync(
     limit: int = typer.Option(
         RSS_DEFAULT_LIMIT, "--limit", "-n", help="每個來源最多處理幾篇文章"
+    ),
+    log_file: Path | None = typer.Option(
+        None, "--log-file", help="把這次同步的彙總結果(一行)附加到這個檔案,給排程自動化用"
     ),
 ) -> None:
     """同步訂閱清單裡的所有來源,抓取新文章加入知識庫。"""
@@ -241,6 +261,11 @@ def feeds_sync(
 
     for result in results:
         typer.echo(_format_feed_sync_result(result))
+
+    if log_file is not None:
+        log_file.parent.mkdir(parents=True, exist_ok=True)
+        with log_file.open("a", encoding="utf-8") as f:
+            f.write(_format_sync_log_line(results) + "\n")
 
 
 @app.command()
