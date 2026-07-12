@@ -178,6 +178,19 @@ def list_documents(db_path: Path | None = None) -> list[DocumentSummary]:
     ]
 
 
+def list_all_chunks(db_path: Path | None = None) -> list[Chunk]:
+    """撈出知識庫裡全部的 chunk(不含 embedding),給 BM25 關鍵字搜尋當語料用。"""
+    conn = _connect(db_path)
+    try:
+        rows = conn.execute("SELECT id, document_id, chunk_index, content FROM chunks").fetchall()
+    finally:
+        conn.close()
+
+    return [
+        Chunk(id=row[0], document_id=row[1], chunk_index=row[2], content=row[3]) for row in rows
+    ]
+
+
 def get_chunk_ids(document_id: str, db_path: Path | None = None) -> list[str]:
     conn = _connect(db_path)
     try:

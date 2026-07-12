@@ -52,3 +52,36 @@ def test_search_ranks_most_similar_document_first() -> None:
 
 def test_search_returns_empty_list_when_nothing_stored() -> None:
     assert search("隨便問問") == []
+
+
+def test_search_ranks_exact_keyword_match_first_when_semantic_scores_tie() -> None:
+    """三篇文章都不含「貓」,fake embedding 給的向量會一樣、語意分數打平,
+    這時候排名應該由 BM25 關鍵字分數決定——這是 hybrid search 真正要解決的
+    情境(精確詞彙搜尋,例如套件名稱)。用三篇(不是兩篇)是因為 BM25 的 idf
+    在 corpus 只有兩篇文件時,一個詞只出現在其中一篇的 idf 剛好算出 0,會讓
+    這個測試在沒有真的排序邏輯的情況下也「碰巧」通過。"""
+    keyword_doc = Document(
+        id="doc-keyword",
+        source_path="/tmp/sqlite-utils.md",
+        title="套件更新",
+        content="sqlite-utils 套件更新了新版本,加了很多功能。",
+    )
+    unrelated_doc_1 = Document(
+        id="doc-unrelated-1",
+        source_path="/tmp/weather.md",
+        title="天氣",
+        content="這是一篇跟資料庫工具完全無關的筆記,純粹講今天天氣。",
+    )
+    unrelated_doc_2 = Document(
+        id="doc-unrelated-2",
+        source_path="/tmp/travel.md",
+        title="旅遊",
+        content="這是一篇跟資料庫工具完全無關的筆記,純粹講出國旅遊。",
+    )
+    _add(keyword_doc)
+    _add(unrelated_doc_1)
+    _add(unrelated_doc_2)
+
+    results = search("sqlite-utils", top_k=3)
+
+    assert results[0].document.id == "doc-keyword"
