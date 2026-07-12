@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import math
 import tempfile
 from datetime import datetime, time, timezone
 from pathlib import Path
@@ -37,6 +38,9 @@ from second_brain.storage import (
 
 st.set_page_config(page_title="Second Brain", page_icon="📚", layout="wide")
 
+_NAV_OPTIONS = ["瀏覽", "搜尋", "問答", "新增筆記", "訂閱管理"]
+_BROWSE_PAGE_SIZE = 20
+
 
 @st.cache_resource
 def _warm_up_providers() -> None:
@@ -49,20 +53,41 @@ _warm_up_providers()
 
 st.title("📚 Second Brain")
 
-tab_browse, tab_search, tab_ask, tab_add, tab_feeds = st.tabs(
-    ["瀏覽", "搜尋", "問答", "新增筆記", "訂閱管理"]
-)
+# 「新增筆記」分頁加完東西之後,會把 nav_target 設成「瀏覽」再 st.rerun(),
+# 這裡在畫導覽列之前先把它套用到 active_tab 上,才能真的切換過去
+# ——單純設定 session_state["active_tab"] 沒有用,widget 的值以自己的 key
+# 為準,要在 widget 建立「之前」先蓋掉那個 key 對應的值。
+if "nav_target" in st.session_state:
+    st.session_state["active_tab"] = st.session_state.pop("nav_target")
 
-with tab_browse:
+active_tab = st.segmented_control(
+    "導覽", _NAV_OPTIONS, default=_NAV_OPTIONS[0], key="active_tab", label_visibility="collapsed"
+)
+if active_tab is None:
+    # segmented_control 允許再點一次目前選中的選項取消選取,這裡沒有「不選任何分頁」
+    # 的狀態,退回瀏覽分頁,不要整頁空白。
+    active_tab = "瀏覽"
+    st.session_state["active_tab"] = active_tab
+
+if active_tab == "瀏覽":
     if "batch_delete_message" in st.session_state:
         st.success(st.session_state.pop("batch_delete_message"))
     if "batch_category_message" in st.session_state:
         st.success(st.session_state.pop("batch_category_message"))
+    if "add_note_message" in st.session_state:
+        st.success(st.session_state.pop("add_note_message"))
 
     existing_categories = list_categories()
     browse_category = st.selectbox(
         "分類篩選", options=["全部"] + existing_categories, key="browse-category-filter"
     )
+
+    # 切換分類篩選之後,文件總數會變,舊的頁碼可能超出新的頁數範圍,
+    # 這裡偵測篩選條件換了就把頁碼重設回第一頁,避免 st.number_input 的
+    # key 存著舊頁碼、跟新的 max_value 衝突。
+    if st.session_state.get("browse-category-prev") != browse_category:
+        st.session_state["browse-page"] = 1
+        st.session_state["browse-category-prev"] = browse_category
 
     documents = (
         list_documents() if browse_category == "全部" else find_documents(category=browse_category)
@@ -76,7 +101,19 @@ with tab_browse:
         )
         st.info(message)
     else:
-        for document in documents:
+        total_pages = max(1, math.ceil(len(documents) / _BROWSE_PAGE_SIZE))
+        col_page, col_page_info = st.columns([1, 3])
+        with col_page:
+            page = st.number_input(
+                "頁數", min_value=1, max_value=total_pages, step=1, key="browse-page"
+            )
+        with col_page_info:
+            st.caption(f"共 {len(documents)} 篇,第 {page} / {total_pages} 頁")
+
+        start = (page - 1) * _BROWSE_PAGE_SIZE
+        page_documents = documents[start : start + _BROWSE_PAGE_SIZE]
+
+        for document in page_documents:
             with st.container(border=True):
                 col_info, col_action = st.columns([6, 1])
                 with col_info:
@@ -220,7 +257,7 @@ with tab_browse:
         elif not new_category_value:
             st.caption("要先在上面填分類名稱,才能套用。")
 
-with tab_search:
+elif active_tab == "搜尋":
     query = st.text_input("搜尋知識庫", placeholder="想搜尋的內容")
     top_k = st.slider("回傳筆數", min_value=1, max_value=20, value=5, key="search-top-k")
     search_category = st.selectbox(
@@ -240,7 +277,7 @@ with tab_search:
                     st.caption(result.document.source_path)
                     st.write(result.chunk.content)
 
-with tab_ask:
+elif active_tab == "問答":
     question = st.text_input("問知識庫一個問題", placeholder="想問的問題")
     ask_top_k = st.slider("檢索筆數", min_value=1, max_value=20, value=5, key="ask-top-k")
     ask_category = st.selectbox("限定分類", options=["全部"] + list_categories(), key="ask-category")
@@ -266,7 +303,7 @@ with tab_ask:
                     )
                 )
 
-with tab_add:
+elif active_tab == "新增筆記":
     st.subheader("上傳檔案")
     uploaded_file = st.file_uploader("選擇 markdown/text 檔案", type=["md", "markdown", "txt"])
     upload_category = st.text_input("分類(留空不分類)", key="upload-category")
@@ -281,9 +318,12 @@ with tab_add:
         if result is None:
             st.warning("檔案內容是空的,沒有東西可以加入。")
         else:
-            st.success(f"已處理「{result.document.title}」— {result.chunk_count} 個片段")
-            if result.document.tags:
-                st.caption("🏷️ " + "、".join(result.document.tags))
+            tag_suffix = f"  🏷️ {'、'.join(result.document.tags)}" if result.document.tags else ""
+            st.session_state["add_note_message"] = (
+                f"已加入「{result.document.title}」— {result.chunk_count} 個片段{tag_suffix}"
+            )
+            st.session_state["nav_target"] = "瀏覽"
+            st.rerun()
 
     st.divider()
 
@@ -309,10 +349,17 @@ with tab_add:
                         skipped += 1
                         continue
                     added += 1
-                    st.success(f"已處理「{feed_result.document.title}」— {feed_result.chunk_count} 個片段")
-                st.info(f"完成:{added} 篇已處理,{skipped} 篇內容是空的被略過。")
 
-with tab_feeds:
+                if added > 0:
+                    st.session_state["add_note_message"] = (
+                        f"完成:{added} 篇已處理,{skipped} 篇內容是空的被略過。"
+                    )
+                    st.session_state["nav_target"] = "瀏覽"
+                    st.rerun()
+                else:
+                    st.info(f"完成:{added} 篇已處理,{skipped} 篇內容是空的被略過。")
+
+elif active_tab == "訂閱管理":
     st.subheader("訂閱清單")
     st.caption("跟上面「新增筆記」的一次性訂閱不同,這裡的來源會被記住,之後按同步就能一次抓所有來源的新文章。")
 
@@ -322,14 +369,20 @@ with tab_feeds:
         st.info("訂閱清單是空的,在下面加一個吧。")
     else:
         if st.button("同步全部"):
-            for sync_result in sync_all_feed_subscriptions():
-                if sync_result.error is not None:
-                    st.error(f"「{sync_result.feed.name}」同步失敗:{sync_result.error}")
-                else:
-                    st.success(
-                        f"「{sync_result.feed.name}」— 新增 {sync_result.added} 篇、"
-                        f"更新 {sync_result.updated} 篇、略過 {sync_result.skipped} 篇空內容"
-                    )
+            sync_results = sync_all_feed_subscriptions()
+            failures = [result for result in sync_results if result.error is not None]
+            successes = [result for result in sync_results if result.error is None]
+
+            if successes:
+                total_added = sum(result.added for result in successes)
+                total_updated = sum(result.updated for result in successes)
+                st.success(
+                    f"{len(successes)} 個來源同步成功 — 共新增 {total_added} 篇、更新 {total_updated} 篇。"
+                )
+            if failures:
+                with st.expander(f"⚠️ {len(failures)} 個來源同步失敗", expanded=True):
+                    for result in failures:
+                        st.error(f"「{result.feed.name}」:{result.error}")
             # 故意不呼叫 st.rerun():馬上 rerun 會把剛印出來的 st.success/st.error 洗掉,
             # 使用者看不到同步結果。上面「上次同步」時間要等下一次互動才會更新,
             # 跟「新增筆記」分頁同樣的已知取捨。
