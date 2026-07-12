@@ -4,21 +4,48 @@
 使用方式看 [README.md](README.md),規劃看 [CLAUDE.md](CLAUDE.md)。這份只記錄
 「現在做到哪、為什麼這樣做、接下來大概要做什麼」,每次做完一個階段性任務就更新。
 
-最後更新:2026-07-12(第十輪,訂閱三個台灣財經 RSS 來源 + 做完文件分類功能)
+最後更新:2026-07-12(第十一輪,再訂閱三個台灣科技 RSS 來源)
 
 ## 現況一句話
 
 CLAUDE.md 的 MVP 加上這些都做完了:`list`/`remove`/`clear`/`add-feed`/自動
 打標籤/Streamlit 網頁介面/一鍵啟動/feed 訂閱清單(CLI+網頁)/`search`/`ask`
 顯示時間/`remove-batch` 批次刪除(CLI+網頁)/UTC+8 時間顯示/翻譯成繁體中文
-(第七輪)/hybrid search(第九輪,已 commit 進 `f44d231`)/**文件分類**
-(第十輪,`科技`/`新聞`/`財經` 三個分類,`list`/`search`/`ask`/瀏覽頁面都能
-按分類篩選,見下面專節)。**第十輪的程式碼還沒 commit**,交接時記得先確認
-有沒有人接手 commit。
+(第七輪)/hybrid search(第九輪,已 commit 進 `f44d231`)/文件分類(第十輪,
+`科技`/`新聞`/`財經` 三個分類,`list`/`search`/`ask`/瀏覽頁面都能按分類篩選,
+已 commit 進 `f0ef6d6` 並 push)。**第十輪跟第十一輪的程式碼都已經 commit
+並 push 上 `origin/master` 了,交接時工作目錄應該是乾淨的。**
 
-**第十輪也訂閱了三個新的台灣財經 RSS 來源**(經濟日報/自由時報財經版/
-Yahoo股市),知識庫現在有 6 個訂閱來源(3 科技 + 3 財經),90 篇文件全部
-已分類完畢(科技 33、財經 47、新聞 10),細節見下面專節。
+**第十一輪沒有改程式碼**,做了三件事:(1) 使用者回報網頁介面噴
+`ImportError: cannot import name 'list_categories'`——這是**已知問題,不是
+新 bug**(見下面決策說明「長時間執行的 process 快取住舊模組」那條),使用者
+自己在 8501 port 上跑的 Streamlit process 是在第十輪加 `list_categories` 之前
+就啟動的,`sys.modules` 快取住舊版 `second_brain.storage`。**修法**:找到
+PID(`Get-CimInstance Win32_Process` 查 `CommandLine` 確認是哪個 process,
+不要瞎猜)、`Stop-Process` 砍掉、用 `preview_start` 重開一個全新的,新 process
+重新 import 就抓到新程式碼了,同時也清掉了我自己前一輪測試留下的 port 8600
+殘留 process。(2) 使用者要求**之後對話一律用繁體中文回覆**,已經存進
+persistent memory(`feedback_language.md`),之後每次對話開始都要記得套用,
+不用等使用者再次提醒。(3) 使用者想加中文科技類的來源,用 `WebSearch` +
+瀏覽器找到三個有實際用 `feedparser.parse()` 驗證過可用的台灣科技媒體
+RSS,列出來讓使用者選,使用者選**全部訂閱**:**iThome**
+(`https://www.ithome.com.tw/rss`)、**TechNews 科技新報**
+(`https://technews.tw/feed/`)、**DIGITIMES 科技/產業**
+(`https://www.digitimes.com.tw/tech/rss/xml/xmlrss_10_0.xml`,這個 feed 有個
+無害的 `document declared as us-ascii, but parsed as utf-8` bozo 警告,
+`feedparser` 還是正確解析出 30 篇文章,不影響使用)。**這次直接在
+`feeds add --category 科技` 一次到位**,不像第十輪訂財經來源時是先訂閱、
+之後才回填分類,不需要事後 `set-category` 補救。**查過但沒有列進候選**:
+數位時代(bnext.com.tw)、INSIDE(inside.com.tw)這兩家目前網站上都找不到
+公開的 RSS 連結(猜測的網址回傳 404 或首頁完全沒有 rss/feed 相關連結),
+可能已經停用公開 RSS、改成只有 App 或電子報訂閱,之後如果有人想訂這兩家,
+要先確認他們是不是真的還有 RSS,不要直接假設網址存在。
+
+**第十輪的內容(訂閱三個財經 RSS 來源 + 做完文件分類功能)沒有變動**,細節
+還是看下面各專節,這裡不重複。知識庫現在有 **9 個訂閱來源**(The Verge/
+Hacker News/Simon Willison's Weblog/iThome/TechNews 科技新報/DIGITIMES 這
+6 個是科技類,經濟日報/自由時報財經版/Yahoo股市這 3 個是財經類),**120 篇
+文件**,分類統計是科技 63、財經 47、新聞 10,全部分類完畢、沒有遺漏。
 
 **第八輪沒有改程式碼,做了兩件事**:(1) 使用者回饋第七輪的翻譯功能「其實好像
 還好」,實際閱讀習慣是「想細看的文章再點進去用 Google 自動翻譯」,不需要整個
@@ -215,8 +242,8 @@ Hybrid search(關鍵字 + 語意搜尋並用)**第九輪已經做完**,文件分
 
 ## 交接檢查清單(接手時建議做的事)
 
-1. `git log --oneline` 確認目前在哪個 commit,`git status --short --branch` 確認有沒有沒 commit 的東西、有沒有 `ahead`/`behind` origin。**這次交接時,文件分類(第十輪)的程式碼還沒 commit**(hybrid search 第九輪已經 commit 進 `f44d231`)——`git status` 應該看得到約 15 個修改過的檔案(`models.py`、`ingestion/pipeline.py`、`interface/cli.py`、`interface/web.py`、`retrieval/ask.py`/`keyword_search.py`/`search.py`、`storage/__init__.py`/`sqlite_store.py`/`store.py`,加上對應的測試檔案),沒有新檔案(這輪都是改既有檔案,不像上一輪加了新模組),視交接當下狀態而定,先看一下有沒有人接手 commit 過。`.claude/launch.json` 也改了(加 `autoPort: true`),這個不算功能程式碼但也還沒 commit。
-2. **知識庫裡現在有真實資料,而且這輪新加了三個財經來源**:除了第六輪訂閱的三個科技來源(The Verge、Hacker News、Simon Willison's Weblog),第十輪又訂閱了經濟日報/自由時報財經版/Yahoo股市,`feeds list` 現在應該看到 6 個訂閱、`list` 應該看到 90 篇左右的文件,全部都已經分類完畢(科技/財經/新聞三類,沒有未分類的)。手動測試/除錯時要小心別誤刪這些真實訂閱或文章(用 `remove-batch`/`clear`/`set-category` 之前務必先 `list`/`feeds list` 確認)。
+1. `git log --oneline` 確認目前在哪個 commit,`git status --short --branch` 確認有沒有沒 commit 的東西、有沒有 `ahead`/`behind` origin。**這次交接時,第十輪(文件分類)跟第九輪(hybrid search)都已經 commit(`f44d231`/`f0ef6d6`)並 push 上 `origin/master`,工作目錄應該是乾淨的**——第十一輪沒有改任何程式碼,只有 `Progress.md` 可能還沒 commit,視交接當下狀態而定先看一下。`.claude/launch.json` 有改過(加 `autoPort: true`),但這個檔案本來就在 `.gitignore` 裡,不會出現在 `git status`,不用理它。
+2. **知識庫裡現在有真實資料,而且陸續訂閱了 9 個真實 RSS 來源**:科技類有 The Verge、Hacker News、Simon Willison's Weblog(第六輪)+ iThome、TechNews 科技新報、DIGITIMES(第十一輪);財經類有經濟日報、自由時報財經版、Yahoo股市(第十輪)。`feeds list` 應該看到這 9 個訂閱、`list` 應該看到 120 篇左右的文件,全部都已經分類完畢(科技/財經/新聞三類,沒有未分類的)。手動測試/除錯時要小心別誤刪這些真實訂閱或文章(用 `remove-batch`/`clear`/`set-category` 之前務必先 `list`/`feeds list` 確認)。
 3. **這台機器沒有設 `ANTHROPIC_API_KEY`**:`ask`/`translate` 都還沒被使用者實際跑過,`second-brain translate` 目前只驗證過「沒 key 時清楚報錯退出」這條路徑,還沒驗證過真的翻譯品質。使用者設定 key 之後,建議提醒他跑一次 `second-brain translate` 幫現有文章補翻譯,並抽查幾篇品質。
 4. `./.venv/Scripts/python.exe -m pytest -q` 應該要 106 個全過(第十輪加了 18 個新測試,88 → 106)、~6 秒內跑完
 5. 如果要手動測 `add`/`search`,第一次跑會下載 ~90MB 的 embedding 模型,需要網路;jieba 第一次執行也會在本機建 prefix dict 快取(不用連網,純本機運算,第一次會慢個零點幾秒)
