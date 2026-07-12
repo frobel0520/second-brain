@@ -4,23 +4,26 @@
 使用方式看 [README.md](README.md),規劃看 [CLAUDE.md](CLAUDE.md)。這份只記錄
 「現在做到哪、為什麼這樣做、接下來大概要做什麼」,每次做完一個階段性任務就更新。
 
-最後更新:2026-07-12(第二輪)
+最後更新:2026-07-12(第三輪)
 
 ## 現況一句話
 
 CLAUDE.md 的 MVP(`add` / `search` / `ask`)已經做完,另外多做了 `list`、
 `remove`、`clear`、`add-feed`(RSS/Atom ingestion)、自動打標籤、Streamlit
-網頁介面、一鍵啟動。**這輪新加的是 feed 訂閱清單**(`second-brain feeds
-add/list/remove/sync`):問過使用者接下來要做哪個方向,選了 Progress.md
-上輪列的候選第一項。過程中順手修掉一個既有 bug——`remove` 指令對網址用
-`Path.resolve()` 會在 Windows 上把 `/` 打散成 `\`,導致沒辦法刪除 RSS 文章
-的紀錄(這個 bug 從 `add-feed` 做出來那次就存在,只是一直沒被踩到)。另外
-在手動驗證時發現**先前對話裡使用者其實已經成功測過 BBC 中文網 RSS**(資料庫裡
-有 `zhongwen/trad` 的真實文章),糾正上一輪筆記寫的「沒有實際驗證過」。
-65 個測試全過(從 48 個增加到 65,新增 17 個涵蓋 feed 訂閱的 sqlite/store/
-pipeline 測試)。git 上一輪的九個 commit 都已確認進了歷史(包含圖示改成 📚
-那次,上一輪筆記寫的「還沒 commit」其實是筆記沒同步更新,不是真的沒 commit),
-**這輪的變更還沒 commit**,下一個對話開始時記得先確認要不要 commit 掉。
+網頁介面、一鍵啟動、**feed 訂閱清單**(`second-brain feeds add/list/remove/
+sync`,第二輪做的,已 commit 進 `302939b`)。**這輪(第三輪)把訂閱清單補進
+網頁介面**:使用者問「接下來做什麼好」,我推薦兩個方向(網頁介面補訂閱清單 /
+hybrid search),使用者選了前者。過程中用 Claude Browser pane 實際跑過一次
+完整流程(訂閱→自動抓標題→首次同步→個別同步→取消訂閱),抓到並修掉兩個 bug:
+(1) CLI 的 `feeds add` 訂閱後是自己手動重跑一遍 `load_feed`+`ingest_document`,
+沒有呼叫 `sync_feed_subscription()`,導致 `last_synced_at` 一直沒被更新
+(手動測試時親眼看到 `feeds list` 顯示「尚未同步」但文章明明已經抓進去);
+(2) 網頁介面的「同步」/「同步全部」按鈕在印出 `st.success`/`st.error` 訊息
+後馬上呼叫 `st.rerun()`,導致訊息瞬間被洗掉、使用者看不到同步結果——這兩個
+都是**真的會壞掉的 bug,不是預防性修改**,見下面決策說明。65 個測試全過
+(新增功能都是重用既有、已測過的 `pipeline.sync_feed_subscription()`,沒有
+新增測試檔案,但手動在瀏覽器裡逐步驗證過)。**這輪的變更還沒 commit**,下一個
+對話開始時記得先確認要不要 commit 掉。
 
 ## 環境
 
@@ -44,7 +47,7 @@ pipeline 測試)。git 上一輪的九個 commit 都已確認進了歷史(包含
 5. `second-brain list` — 列出知識庫裡的文件(標題、片段數、來源路徑、標籤)。
 6. `second-brain remove <source>` — 從知識庫刪除指定來源的紀錄(sqlite + chroma),不動硬碟上的檔案本身。純比對 `source_path`,**不會**做內容比對(remove 是明確指名要刪哪個來源,跟 add 的模糊 dedupe 語意不一樣)。`source` 參數型別**這輪改成 `str`,不是 `Path`**,而且**沒有** `exists=True`,因為要能刪除已經從硬碟上消失的檔案的舊紀錄,也要能刪 RSS 文章的網址(見下面決策說明的 bug 修復)。
 7. `second-brain clear [--yes/-y]` — 清空整個知識庫(sqlite + chroma)。預設用 `typer.confirm()` 互動確認,`--yes`/`-y` 跳過確認直接清空(給腳本/非互動情境用)。不動硬碟上的原始檔案。
-8. `second-brain feeds add <feed_url> [--name] [--limit/-n N]` — **這輪新加**。把來源加進訂閱清單(SQLite `feeds` 表)並立刻同步一次;`--name` 不給的話會嘗試呼叫 `rss_loader.get_feed_title()` 抓 feed 頻道標題,抓不到就用網址本身當名稱。同一個網址重複 `feeds add` 會被拒絕(印出「已經訂閱過」,exit code 1),不會建立第二筆訂閱紀錄。
+8. `second-brain feeds add <feed_url> [--name] [--limit/-n N]` — 把來源加進訂閱清單(SQLite `feeds` 表)並立刻同步一次;`--name` 不給的話會嘗試呼叫 `rss_loader.get_feed_title()` 抓 feed 頻道標題,抓不到就用網址本身當名稱。同一個網址重複 `feeds add` 會被拒絕(印出「已經訂閱過」,exit code 1),不會建立第二筆訂閱紀錄。**這輪(第三輪)改成內部直接呼叫 `sync_feed_subscription()`**,不再自己手動重跑一次 `load_feed`+`ingest_document`,順便修掉「訂閱後 `last_synced_at` 沒更新」的 bug,見下面決策說明。
 9. `second-brain feeds list` — **這輪新加**。列出訂閱清單:名稱、網址、上次同步時間(`尚未同步` 或時間戳)。
 10. `second-brain feeds remove <feed_url>` — **這輪新加**。從訂閱清單移除來源(刪 `feeds` 表那一列),**不會**動到已經加入知識庫的文章——訂閱清單只是「要不要繼續追蹤」的紀錄,跟文章本身是否留在知識庫是兩件事,要連文章一起刪要另外用 `second-brain remove <文章網址>`。
 11. `second-brain feeds sync [--limit/-n N]` — **這輪新加**。同步訂閱清單裡的**所有**來源:對每個訂閱依序呼叫 `load_feed()` + `ingest_document()`,更新 `last_synced_at`,印出每個來源「新增 X 篇、更新 Y 篇、略過 Z 篇」。**單一來源抓取/解析失敗不會擋住其他來源**——`pipeline.sync_feed_subscription()` 把例外包進 `FeedSyncResult.error`,不會往外拋,`feeds sync` 對每個來源印出「同步失敗:{原因}」後繼續處理下一個。
@@ -57,14 +60,15 @@ pipeline 測試)。git 上一輪的九個 commit 都已確認進了歷史(包含
   - `feed_url` 參數其實是「feedparser 看得懂的任何東西」——網址、本機檔案路徑、feed 原始內容字串都吃,單元測試因此完全不連網(直接餵 XML 字串)
   - **這輪已經用真實網址實測過**:`http://feeds.bbci.co.uk/news/world/rss.xml`(BBC News 國際版),`add-feed --limit 5` 抓了 5 篇真實文章,標籤、dedupe(重跑一次變成「已更新」不會重複)、`search` 語意排序全部驗證過在真實英文新聞內容上正常運作。之前「還沒對真實網址測過」這個粗糙邊界已經解決。
 
-**Streamlit 網頁介面**(這輪新加的,使用者要求要能「自己使用看看」):`second_brain/interface/web.py`,`streamlit run` 啟動,四個分頁:
+**Streamlit 網頁介面**:`second_brain/interface/web.py`,`streamlit run` 啟動,**五個分頁**:
   - **瀏覽**:列出所有文件(標題/片段數/標籤/來源),每筆有刪除按鈕
   - **搜尋**:文字框 + 滑桿(top-k),結果卡片顯示分數/來源/片段內容
   - **問答**:文字框問問題,沒有 `ANTHROPIC_API_KEY` 會顯示友善錯誤(跟 CLI 的 `ask` 一致)
-  - **新增筆記**:上傳本機檔案(存到 temp file 再走 `load_document()`)、或輸入 RSS 網址走 `load_feed()`
+  - **新增筆記**:上傳本機檔案(存到 temp file 再走 `load_document()`)、或輸入 RSS 網址走 `load_feed()`(一次性,不記住來源)
+  - **訂閱管理**(**這輪(第三輪)新加**):列出訂閱清單(名稱/網址/上次同步時間),每筆有「同步」「取消訂閱」按鈕,上面還有一個「同步全部」;下半部是新增訂閱的表單(網址/顯示名稱/首次同步篇數)。CLI 有的 `feeds add/list/remove/sync` 這個分頁全部對應得到,底層呼叫同一組 `storage.subscribe_feed()`/`unsubscribe_feed()`/`list_feed_subscriptions()` + `pipeline.sync_feed_subscription()`/`sync_all_feed_subscriptions()`,不重寫邏輯。
   - 用 `@st.cache_resource` 包一個 `_warm_up_providers()`,頁面第一次載入就把 embedding/tagging 模型準備好,避免 Streamlit 每次互動重跑整支 script 時反覆重新載入模型
   - **沒有網頁版的 `clear`**:清空整個知識庫這種危險操作刻意只留在 CLI,網頁介面不放
-  - **圖示是 📚(書本),不是 🧠**:一開始隨手用了大腦 emoji(`page_icon`/`st.title` 都是),使用者說想要「知識庫的感覺,不要大腦的圖」,換成 📚。改動範圍只有 `web.py` 這兩處,`.claude/launch.json`、README、桌面/開始功能表捷徑都沒有大腦圖案,不用跟著改。**這批圖示改動這輪對話結束時還沒 commit**,見上面「現況一句話」。
+  - **圖示是 📚(書本),不是 🧠**:使用者說想要「知識庫的感覺,不要大腦的圖」換的,這批上一輪已經 commit 進 `a6d4cc1`。
 
 **一鍵啟動網頁介面**(使用者要求「在專案資料夾那邊就可以跑,或者有個本機捷徑」):
   - [run_web.bat](run_web.bat):放在專案根目錄,雙擊就會 `cd` 到自己所在的目錄再跑 `streamlit run`,不用先手動開終端機/`cd`。
@@ -96,6 +100,9 @@ pipeline 測試)。git 上一輪的九個 commit 都已確認進了歷史(包含
 - **`feeds add` 重複訂閱同一個網址會被拒絕,不是靜默忽略或更新**:`storage/store.py:subscribe_feed()` 先查 `get_feed_subscription_by_url()`,已存在就回傳 `None`,CLI 印「已經訂閱過這個來源了」並 exit 1。選擇「明確報錯」而不是「靜默升級成 no-op」,是因為使用者打錯字或忘記自己訂閱過的機率不低,直接告訴他比默默什麼都不做更有幫助。
 - **修掉一個既有 bug:`remove` 指令對網址用 `Path.resolve()` 在 Windows 上會壞掉**:這輪手動驗證 `feeds` 系列指令時,想清掉自己加的測試文章,發現 `second-brain remove https://example.com/...` 完全找不到紀錄。原因是 `remove` 的 `file_path` 參數型別是 `Path`,`file_path.resolve()` 在 Windows 上會把網址當成相對路徑正規化,`/` 全部變成 `\`,結果拿去查 `source_path` 當然查不到(RSS 文章的 `source_path` 是 `rss_loader.py` 存進去的原始網址,不會有反斜線)。**這個 bug 從 `add-feed` 那次對話就存在**,只是一直沒人真的用 `remove` 刪過 RSS 來源的文章,沒被踩到。修法:`remove` 的參數改成 `source: str`,只有「不含 `://`」才當本機路徑做 `Path(source).resolve()`,網址原樣傳給 `remove_document()`。用真的加一篇 RSS 文章再 `remove` 掉驗證過修好了,`second_brain/interface/web.py` 的瀏覽分頁刪除按鈕本來就是直接呼叫 `remove_document(document.source_path)`(不經過這段 CLI 的路徑解析),不受影響、不用改。
 - **上一輪筆記寫錯的地方,這輪順便更正**:上一輪 Progress.md 說「BBC 中文網網址沒有實際驗證過」,但這輪手動測試時發現資料庫裡已經有 10 篇 `bbc.com/zhongwen/...` 的真實文章(標題像「颱風巴威登陸浙江」),代表使用者上輪對話結束後其實有自己再測過一次中文網址,只是沒有回報、筆記也沒更新。以後如果資料庫裡的內容跟筆記寫的對不上,**優先相信資料庫裡看到的實際狀態**,筆記只是輔助記憶,不是唯一真相來源。
+- **第三輪:`feeds add` 訂閱後 `last_synced_at` 沒更新,是重複實作邏輯造成的 bug**:CLI 的 `feeds_app.command("add")` 一開始寫的時候,是自己手動呼叫 `load_feed()` + 迴圈 `ingest_document()`(仿照 `add-feed` 的寫法),沒有意識到這樣繞過了 `sync_feed_subscription()` 裡「更新 `last_synced_at`」那一步。這輪加網頁介面訂閱管理分頁、要重用同一套同步邏輯時才發現這個落差(因為網頁介面一開始就是直接呼叫 `sync_feed_subscription()`,兩邊行為對不起來)。**教訓**:兩個地方都要做「訂閱來源的第一次同步」這件事時,不該分別手動兜一份 load+ingest 迴圈,應該直接呼叫共用的 `sync_feed_subscription()`——這也是為什麼 `pipeline.py` 要把同步邏輯獨立成一個函式而不是直接寫在 CLI 指令裡。修法:`feeds_add` 改成 `subscribe_feed()` 拿到 `FeedSubscription` 之後直接呼叫 `sync_feed_subscription(feed, limit=limit)`,不再自己重複一遍 load/ingest 迴圈,程式碼也變短。
+- **第三輪:網頁介面「同步」按鈕的訊息被自己呼叫的 `st.rerun()` 洗掉,是真的會發生的 bug**:一開始寫的時候,`st.success(...)`/`st.error(...)` 印完馬上接一行 `st.rerun()`(想法是讓上面「上次同步」的時間戳立刻更新)。用 Claude Browser pane 實際點過一次才發現:`st.rerun()` 會讓整個 script 重新從頭執行,這個執行環境裡剛剛印出的訊息不會被保留下來,使用者完全看不到同步結果,只會看到清單瞬間「消失又出現」。**修法是拿掉這兩處(單一同步、同步全部)的 `st.rerun()`**,讓訊息留在畫面上;代價是「上次同步」時間戳要等下一次互動(切分頁、點別的按鈕)才會反映最新值——這跟「新增筆記」分頁「新增後不會自動跳轉去瀏覽分頁」是同一類已經接受的 Streamlit rerun 模型下的取捨,不是新問題。**判斷原則,以後遇到類似情況可以參考**:一個互動的回饋(`st.success`/`st.error`/`st.warning`)跟「馬上強制重整」這兩件事衝突時,優先保留使用者看得到的回饋,強制重整可以晚一點靠使用者自己的下一個動作觸發。「取消訂閱」按鈕沒有這個問題(它本來就沒有訊息要顯示),保留 `st.rerun()` 沒問題。
+- **第三輪:瀏覽器自動化操作 Streamlit 的 `text_input` 這次踩到的細節,補充上一輪的筆記**:上一輪筆記寫「要用 `javascript_tool` 搭配原生 setter + dispatchEvent keydown Enter」,這輪實測發現:用 `form_input` 工具(原生 setter,不含事件派發)先把值寫進 DOM,再用 `computer` 的 `left_click` 點擊**另一個欄位**(觸發 blur)一樣能讓 Streamlit 端收到新值、跑出對應的按鈕/畫面——不一定要模擬 Enter 鍵。另外**踩到一個新陷阱**:用 `computer` 的 `key` 動作送 `ctrl+a` 想清空欄位再 `type` 新內容,結果兩次的內容疊在一起變成重複貼上(可能是 `ctrl+a` 在該元件裡沒有真的選取全部文字)。**以後要清空 Streamlit 文字輸入框再填新值,優先用 `form_input` 直接設定完整值(它是整個覆蓋,不是插入),不要用 `ctrl+a` + `type` 這個組合**,比較不會出現內容重複疊加的問題。
 - **手動驗證網頁介面時發現的自動化工具限制**(跟程式碼本身無關,記錄下來是因為之後如果還要用瀏覽器自動化測 Streamlit 應用會再踩到):`computer` 工具的 `type`/`key` 動作有時候不會觸發 Streamlit React 元件的內部事件處理(尤其是 `st.text_input` 需要「真的」keydown 事件才會 commit 值並觸發 rerun),用 `javascript_tool` 搭配原生 `HTMLInputElement` 的 setter(`Object.getOwnPropertyDescriptor(...).set`)+ 手動 `dispatchEvent(new KeyboardEvent('keydown', {keyCode:13,...}))` 比較可靠。另外這次的瀏覽器 `screenshot` 動作一直逾時,改用 `get_page_text`/`read_page`/直接查 DB 驗證資料正確性,不影響驗證結果。
 - **`run_web.bat` 一開始沒處理 Streamlit 的「Welcome」提示,會整個卡死**:第一次手動測試雙擊啟動時,發現視窗開了、python 進程也在跑,但 port 8501 永遠沒 bind、瀏覽器打不開。原因是 Streamlit 第一次在「有 console 但沒人可以互動輸入」的情況下執行(例如被 `Start-Process`/雙擊捷徑這種方式啟動的分離視窗),會卡在一個一次性的「Welcome to Streamlit,請輸入 email 或按 Enter 跳過」的 stdin 提示——沒有 `%USERPROFILE%\.streamlit\credentials.toml` 這個檔案就會觸發,而這個提示沒人能按,就永遠卡住,連錯誤訊息都不會印。**這是一個真的修好的 bug,不是預防性程式碼**:一開始想用手動在使用者機器上建一個全域 `credentials.toml` 來解決,但那樣的話這個 repo 換一台機器/換一個使用者就會重現同樣的卡住,所以改成讓 `run_web.bat` 自己在啟動前檢查、不存在就自動建立空的 `credentials.toml`(內容是 `[general]\nemail = ""`),讓它在任何機器上第一次雙擊都能正常動,不用任何人先手動用終端機跑過一次去回答那個提示。用「先刪掉這個檔案模擬全新機器」的方式驗證過批次檔真的能自己處理好這個情況。
 
@@ -108,7 +115,7 @@ pipeline 測試)。git 上一輪的九個 commit 都已確認進了歷史(包含
 - `search`/`ask` 目前**不會**顯示文件的標籤,只有 `add`/`add-feed` 完成訊息跟 `list` 會顯示。
 - 沒有針對標籤的操作(例如按標籤過濾 `list`/`search`),純粹先把資料存起來。
 - `add-feed` 的 HTML 去標籤是陽春正則,不是完整 HTML parser(見上面決策說明);`<script>`/`<style>` 內容不會被排除。
-- **`second-brain feeds` 訂閱清單只有 CLI,網頁介面還沒跟進**:`web.py` 的「新增筆記」分頁還是只有一次性的 `load_feed()`(等同 `add-feed`),沒有訂閱/同步的 UI。CLAUDE.md 是「CLI-first」原則,先在 CLI 做完是符合預期的順序,但如果使用者常態用網頁介面,這個落差會有感——下次可以考慮在網頁介面加一個「訂閱清單」分頁。
+- **網頁介面的「訂閱管理」分頁沒有「同步全部」的個別失敗提示分組**:`sync_all_feed_subscriptions()` 回傳的每個結果都各印一則 `st.success`/`st.error`,來源一多畫面會變得很長,沒有摺疊/分組。對個人用途的訂閱數量應該還好,先不處理。
 - **`feeds sync` 是依序同步,不是平行處理**:訂閱來源一多、其中有網路慢的來源,`sync_all_feed_subscriptions()` 會依序等每個來源做完才處理下一個,沒有做並行抓取。對個人用途的訂閱數量(大概幾個到十幾個)應該還好,但沒有實測過同步大量來源時的耗時。
 - **`feeds add`/`feeds sync` 沒有記錄「這次同步抓到幾篇新文章、幾篇失敗」的歷史**,只有 `last_synced_at` 一個時間戳,沒有同步紀錄/log,沒辦法回頭查「上次同步到底發生了什麼」。
 - **Streamlit 網頁介面沒有 `clear`**(刻意的,見上面決策說明),要清空知識庫還是得用 CLI。
@@ -124,10 +131,10 @@ CLAUDE.md「未來規劃方向」列的:
 - 自動化處理的其餘部分(關聯筆記推薦、去重複——自動打標籤這一小塊已經做完)
 - Web UI 或 Raycast/Alfred 整合(**Streamlit 網頁介面已經做完基本版,而且使用者本人已經用過**,如果要往「多人使用」或更精緻互動的方向,可能要考慮換成正式 web app)
 
-使用者說這些方向都想做,已經照優先順序做完 `remove` → 「更聰明的 dedupe」+「清空知識庫指令」→ 「自動打標籤(殼)」→ 「RSS ingestion」→ 「Streamlit 網頁介面」→「一鍵啟動」→ **「feed 訂閱清單」(這輪)**。**下一個對話開始時,建議問使用者接下來要做哪個**,不要自己選。
+使用者說這些方向都想做,已經照優先順序做完 `remove` → 「更聰明的 dedupe」+「清空知識庫指令」→ 「自動打標籤(殼)」→ 「RSS ingestion」→ 「Streamlit 網頁介面」→「一鍵啟動」→ 「feed 訂閱清單(CLI)」→ **「feed 訂閱清單補進網頁介面」(這輪)**。**下一個對話開始時,建議問使用者接下來要做哪個**,不要自己選。這輪問的時候我推薦了兩個方向(補網頁介面 / hybrid search),使用者選了補網頁介面;**hybrid search 還沒做,是目前排在前面的候選**。
 
 候選(不代表優先順序):
-- **網頁介面補上訂閱清單 UI**:CLI 這輪已經做完 `feeds add/list/remove/sync`,網頁介面的「新增筆記」分頁還停在一次性訂閱,見「已知的粗糙邊界」。
+- **Hybrid search**(這輪推薦過、使用者說「先做」補網頁介面的那個,這個候選還在等):目前 `search`/`ask` 只有語意搜尋(向量相似度),對精確詞彙查詢(人名、專有名詞)通常不如關鍵字搜尋準。加關鍵字 + 語意並用,會直接讓所有既有筆記的搜尋品質提升,不像新 ingestion 來源那樣只影響新加的內容。
 - 更多 ingestion 來源(瀏覽器書籤、Readwise/Instapaper、Obsidian/Notion 匯出)。
 - **YouTube 頻道 RSS**:對話中討論過,使用者問過但決定「先不做」。要注意的是 YouTube 頻道 RSS 只有標題+短描述,**沒有逐字稿**,能做的頂多是「新影片書籤」,不是「影片內容知識庫」;如果之後想做後者,得另外接字幕/逐字稿的來源,不是單純的 RSS ingestion 可以解決的,下次有人提這個要先講清楚這個限制。
 - Hybrid search、關聯筆記推薦、去重複。
@@ -136,8 +143,8 @@ CLAUDE.md「未來規劃方向」列的:
 
 ## 交接檢查清單(接手時建議做的事)
 
-1. `git log --oneline` 確認目前在哪個 commit,`git status` 確認有沒有沒 commit 的東西(這次交接時,**feed 訂閱清單 + `remove` 的 bug 修復這批預期還沒 commit**,上一輪的九個 commit 都已確認進了歷史)
-2. `./.venv/Scripts/python.exe -m pytest -q` 應該要 65 個全過、~4 秒內跑完
+1. `git log --oneline` 確認目前在哪個 commit,`git status` 確認有沒有沒 commit 的東西(這次交接時,**第三輪:網頁介面訂閱管理分頁 + `feeds add`/`st.rerun()` 兩個 bug 修復,這批預期還沒 commit**;第二輪的 feed 訂閱清單 CLI + `remove` bug 修復已經進了 `302939b`)
+2. `./.venv/Scripts/python.exe -m pytest -q` 應該要 65 個全過、~4 秒內跑完(這輪沒加新測試檔案,新功能是重用已測過的 `pipeline.sync_feed_subscription()`,靠手動瀏覽器驗證,不是新增自動化測試)
 3. 如果要手動測 `add`/`search`,第一次跑會下載 ~90MB 的 embedding 模型,需要網路;jieba 第一次執行也會在本機建 prefix dict 快取(不用連網,純本機運算,第一次會慢個零點幾秒)
 4. 如果要手動測 `ask`,需要使用者提供 `ANTHROPIC_API_KEY`(這台機器目前沒設,使用者已經知道怎麼設定,是自己的事,不用主動催)
 5. `pyproject.toml` 這輪陸續加了 `jieba>=0.42`、`feedparser>=6.0`、`streamlit>=1.38`(在 `[project.optional-dependencies].ui`,不在預設 `dev` 裡)依賴,如果是全新環境要記得重新 `pip install -e ".[dev]"`(CLI/測試)跟 `pip install -e ".[ui]"`(網頁介面)

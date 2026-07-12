@@ -36,7 +36,7 @@ CLI 之外還有一個本機網頁介面,同一個知識庫、同一套底層邏
 ./.venv/Scripts/python.exe -m streamlit run second_brain/interface/web.py
 ```
 
-跑起來後瀏覽器會自動開 `http://localhost:8501`,四個分頁:瀏覽(含刪除)、搜尋、問答、新增筆記(上傳檔案 / 訂閱 RSS)。沒有網頁版的 `clear`,清空知識庫還是要用 CLI(危險操作,刻意不放進網頁介面)。
+跑起來後瀏覽器會自動開 `http://localhost:8501`,五個分頁:瀏覽(含刪除)、搜尋、問答、新增筆記(上傳檔案 / 一次性抓 RSS)、訂閱管理(常態追蹤 RSS 來源:訂閱/同步/取消訂閱,對應 CLI 的 `feeds` 指令組)。沒有網頁版的 `clear`,清空知識庫還是要用 CLI(危險操作,刻意不放進網頁介面)。
 
 **更快的啟動方式**(Windows):直接雙擊專案根目錄的 [run_web.bat](run_web.bat),或桌面上的「Second Brain」捷徑(第一次設定時建立的,指向這個 `.bat`)。
 
@@ -75,7 +75,7 @@ second_brain/
 - `add` 對同一份筆記是 upsert 語意:再次 add 會刪掉舊版本(sqlite + chroma)再存新的,不會重複塞入。判斷「同一份筆記」的邏輯:先比對 `source_path`(內容改了但路徑沒變),找不到再比對 `content` 是否完全相同(路徑變了但內容沒變 —— 例如檔案改名/搬家)
 - `TaggingProvider` 也是抽象介面,之後要換成 LLM 或規則式分類只需新增一個實作;`add` 時會自動呼叫,把標籤存進 `Document.tags`
 - `add` 跟 `add-feed` 共用同一套「標籤 → 切塊 → embedding → 存檔」邏輯(`ingestion/pipeline.py:ingest_document()`),加新的 ingestion 來源或新的 interface(CLI、網頁)只要能產生 `Document`,就自動有標籤/dedupe/embedding,不用重寫這段
-- **feed 訂閱清單**(`feeds` 指令組)跟一次性的 `add-feed` 是分開的功能:`add-feed` 抓一次就忘記,`feeds add` 會把來源記進 SQLite 的 `feeds` 表,之後可以用 `feeds sync` 一次同步所有訂閱來源。同步邏輯(`ingestion/pipeline.py:sync_feed_subscription()`)內部還是呼叫 `load_feed()` + `ingest_document()`,不重寫抓取/dedupe 邏輯
+- **feed 訂閱清單**(`feeds` 指令組)跟一次性的 `add-feed` 是分開的功能:`add-feed` 抓一次就忘記,`feeds add` 會把來源記進 SQLite 的 `feeds` 表,之後可以用 `feeds sync` 一次同步所有訂閱來源。同步邏輯(`ingestion/pipeline.py:sync_feed_subscription()`)內部還是呼叫 `load_feed()` + `ingest_document()`,不重寫抓取/dedupe 邏輯;CLI 的 `feeds add` 跟網頁介面的「訂閱管理」分頁都呼叫同一個 `sync_feed_subscription()` 做第一次同步,不各自兜一份
 - `interface/` 底下的 `cli.py` 跟 `web.py` 是同一組核心邏輯的兩種操作介面,兩者都不直接碰 SQLite/ChromaDB,一律透過 `storage`/`retrieval`/`ingestion.pipeline` 的介面
 
 資料預設存在 `data/`(已 gitignore):

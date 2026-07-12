@@ -15,6 +15,7 @@ from second_brain.ingestion.pipeline import (
     IngestResult,
     ingest_document,
     sync_all_feed_subscriptions,
+    sync_feed_subscription,
 )
 from second_brain.ingestion.rss_loader import get_feed_title, load_feed
 from second_brain.retrieval.ask import ask as run_ask
@@ -151,16 +152,12 @@ def feeds_add(
 
     typer.echo(f"已訂閱「{feed.name}」({feed_url})")
 
-    try:
-        documents = load_feed(feed_url, limit=limit)
-    except Exception as error:
-        typer.echo(f"訂閱成功,但第一次同步失敗:{error}")
+    result = sync_feed_subscription(feed, limit=limit)
+    if result.error is not None:
+        typer.echo(f"訂閱成功,但第一次同步失敗:{result.error}")
         raise typer.Exit(code=1)
 
-    for document in documents:
-        result = ingest_document(document)
-        if result is not None:
-            typer.echo(_format_ingest_result(result, document.source_path))
+    typer.echo(_format_feed_sync_result(result))
 
 
 @feeds_app.command("list")
