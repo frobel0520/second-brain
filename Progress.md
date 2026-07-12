@@ -4,7 +4,7 @@
 使用方式看 [README.md](README.md),規劃看 [CLAUDE.md](CLAUDE.md)。這份只記錄
 「現在做到哪、為什麼這樣做、接下來大概要做什麼」,每次做完一個階段性任務就更新。
 
-最後更新:2026-07-12(第十二輪,退訂三個英文科技來源、改訂三個中文新聞來源)
+最後更新:2026-07-12(第十三輪,`feeds sync` 排程自動化)
 
 ## 現況一句話
 
@@ -13,9 +13,14 @@ CLAUDE.md 的 MVP 加上這些都做完了:`list`/`remove`/`clear`/`add-feed`/�
 顯示時間/`remove-batch` 批次刪除(CLI+網頁)/UTC+8 時間顯示/翻譯成繁體中文
 (第七輪)/hybrid search(第九輪,已 commit 進 `f44d231`)/文件分類(第十輪,
 `科技`/`新聞`/`財經` 三個分類,`list`/`search`/`ask`/瀏覽頁面都能按分類篩選,
-已 commit 進 `f0ef6d6` 並 push)。**第十輪、第十一輪的程式碼都已經 commit
-並 push 上 `origin/master` 了;第十二輪沒有改程式碼,交接時工作目錄應該
-是乾淨的(除非 `Progress.md` 這次更新還沒 commit)。**
+已 commit 進 `f0ef6d6` 並 push)/**`feeds sync` 排程自動化**(第十三輪,
+Windows 排程工作每天早上 8 點自動跑一次,見下面專節)。**CLAUDE.md 原本把
+「自動化排程」明確排除在 MVP 範圍外,這次是使用者主動要求才做,不是我自己
+決定跨出範圍。**
+
+**第十三輪程式碼還沒 commit**,交接時記得先確認有沒有人接手 commit——
+`git status` 應該看得到 `second_brain/interface/cli.py` 改過、新增
+`tests/interface/test_cli.py`。
 
 **第十二輪:使用者決定把知識庫換成全部中文內容**——退訂 The Verge/Hacker
 News/Simon Willison's Weblog 這三個英文科技來源、**並刪除這三個來源已經拉
@@ -93,7 +98,7 @@ RSS,列出來讓使用者選,使用者選**全部訂閱**:**iThome**
 8. `second-brain feeds add <feed_url> [--name] [--limit/-n N] [--category/-c C]` — 把來源加進訂閱清單(SQLite `feeds` 表)並立刻同步一次;`--name` 不給的話會嘗試呼叫 `rss_loader.get_feed_title()` 抓 feed 頻道標題,抓不到就用網址本身當名稱。同一個網址重複 `feeds add` 會被拒絕(印出「已經訂閱過」,exit code 1),不會建立第二筆訂閱紀錄。內部直接呼叫 `sync_feed_subscription()` 做第一次同步,不會自己重複一遍 load/ingest 迴圈。`--category` 是**第十輪新加**,之後每次同步進來的文章都會標上這個分類。
 9. `second-brain feeds list` — 列出訂閱清單:名稱、**分類**(第十輪新加,`[未分類]` 或分類名稱)、網址、上次同步時間(`尚未同步` 或時間戳)。
 10. `second-brain feeds remove <feed_url>` — 從訂閱清單移除來源(刪 `feeds` 表那一列),**不會**動到已經加入知識庫的文章——訂閱清單只是「要不要繼續追蹤」的紀錄,跟文章本身是否留在知識庫是兩件事,要連文章一起刪要另外用 `second-brain remove <文章網址>`。
-11. `second-brain feeds sync [--limit/-n N]` — 同步訂閱清單裡的**所有**來源:對每個訂閱依序呼叫 `sync_feed_subscription()`,更新 `last_synced_at`,印出每個來源「新增 X 篇、更新 Y 篇、略過 Z 篇」。**單一來源抓取/解析失敗不會擋住其他來源**——`pipeline.sync_feed_subscription()` 把例外包進 `FeedSyncResult.error`,不會往外拋,`feeds sync` 對每個來源印出「同步失敗:{原因}」後繼續處理下一個。**每次同步時,凡是這次有被抓回來的文章都會用該訂閱目前的分類重新蓋掉分類**(見下面「文件分類」專節),這是刻意的行為,不是副作用;但**只有這次同步真的抓到的文章會被蓋**,已經滾出 feed 目前回傳範圍的舊文章不會被觸碰到,分類要嘛維持原樣、要嘛(如果從來沒被同步過)維持未分類,細節見下面的已知限制。
+11. `second-brain feeds sync [--limit/-n N] [--log-file PATH]` — 同步訂閱清單裡的**所有**來源:對每個訂閱依序呼叫 `sync_feed_subscription()`,更新 `last_synced_at`,印出每個來源「新增 X 篇、更新 Y 篇、略過 Z 篇」。**單一來源抓取/解析失敗不會擋住其他來源**——`pipeline.sync_feed_subscription()` 把例外包進 `FeedSyncResult.error`,不會往外拋,`feeds sync` 對每個來源印出「同步失敗:{原因}」後繼續處理下一個。**每次同步時,凡是這次有被抓回來的文章都會用該訂閱目前的分類重新蓋掉分類**(見下面「文件分類」專節),這是刻意的行為,不是副作用;但**只有這次同步真的抓到的文章會被蓋**,已經滾出 feed 目前回傳範圍的舊文章不會被觸碰到,分類要嘛維持原樣、要嘛(如果從來沒被同步過)維持未分類,細節見下面的已知限制。`--log-file` 是**第十三輪新加**,給了的話會把這次同步的彙總結果(新增/更新總篇數、失敗來源數+原因)當一行附加寫進指定檔案,是給下面「排程自動化」專節的 Windows 排程工作用的,不用 `--log-file` 的話行為完全不變。
 12. `second-brain feeds set-category <feed_url> <category>` — **第十輪新加**。更新一個已訂閱來源的分類,只影響**之後**同步進來的新文章,不會回頭改已經存在的文件——舊文件要改分類要用下面的 `set-category` 指令。
 13. `second-brain remove-batch [--after DATE] [--before DATE] [--keyword K] [--source S] [--yes/-y]` — 依日期範圍/關鍵字/來源批次刪除文件,三個條件是**使用者要求的 OR**(符合任一個就刪,不是同時符合),`--after`/`--before` 兩個一起給是例外、彼此是 AND(定義一段區間)。**至少要給一個條件**,不然要用 `clear`。刪除前會列出符合的文件並要求確認(跟 `clear` 同樣的安全機制,`--yes` 可跳過)。日期格式是 `YYYY-MM-DD`,格式錯會被 typer 擋下來,不會靜默失敗。底層是 `storage/sqlite_store.py:find_documents()`,用動態組出的 `WHERE (cond1) OR (cond2) OR (cond3)` 查詢,`storage.remove_documents(ids)` 批次刪。**第五輪在網頁介面「瀏覽」分頁下方加了對應的批次刪除區塊**,同一套底層函式,UX 是「篩選條件 → 預覽符合的文件 → 勾選確認 → 刪除這些文件」四步驟,細節見下面決策說明。
 14. `second-brain set-category <category> [--after DATE] [--before DATE] [--keyword K] [--source S] [--yes/-y]` — **第十輪新加**。跟 `remove-batch` 一模一樣的篩選邏輯跟安全機制(預覽 → 確認 → 執行),差別是把符合條件的文件分類**設成同一個值**,不是刪除。主要用途是幫既有文件補分類(例如透過一次性 `add-feed` 加入、沒有訂閱紀錄可以依循的文章),細節見下面「文件分類」專節。
@@ -128,6 +133,13 @@ RSS,列出來讓使用者選,使用者選**全部訂閱**:**iThome**
   - **新訂閱直接在 `feeds add --category 新聞` 一次到位**:**中央社(國際)**(`https://feeds.feedburner.com/rsscna/intworld`)、**BBC中文網**(`http://feeds.bbci.co.uk/zhongwen/trad/rss.xml`)、**ETtoday**(`https://feeds.feedburner.com/ettoday/realtime`),都是先用 `WebSearch` + 瀏覽器找候選、逐一用 `feedparser.parse()` 實測過才列進候選給使用者選,不是憑空猜網址。**BBC中文網這次變成正式訂閱**:知識庫裡本來就有 10 篇 BBC 中文網文章(很久以前用一次性 `add-feed` 加進來、被歸類「新聞」),`feeds add` 訂閱同一個 feed 之後,`sync_feed_subscription()` 的 dedupe 邏輯(比對 `source_path`)自動把這 10 篇的分類重新蓋上(還是「新聞」,值沒變但走的是同一套機制)、再加 2 篇新文章,不需要額外處理就自然接上了。
   - **查過但沒有列進候選的中文新聞來源**:**公視新聞**(`https://about.pts.org.tw/rss/XML/newsfeed.xml`)網址存在、頁面上有列出來,但實際用 `feedparser`/`urllib` 連線會噴 `SSL: CERTIFICATE_VERIFY_FAILED`(伺服器憑證缺 Subject Key Identifier,是對方網站憑證設定有問題,不是我們這邊的問題),沒有辦法用,之後如果又有人想訂公視新聞,先確認對方憑證問題有沒有修好,不要假設能直接接上。
   - **最終結果**:9 個訂閱來源(科技 3、財經 3、新聞 3),109 篇文件,分類統計新聞 32、財經 47、科技 30,全部分類完畢。
+
+**`feeds sync` 排程自動化(第十三輪新加)**:CLAUDE.md 明確把「自動化排程」排除在 MVP 範圍外,這是使用者主動要求要跨出這個範圍才做的,不是自己決定的。
+  - **兩個問題先問過使用者才動工**:(1) 多久同步一次——使用者選**每天一次**;(2) 要不要留執行紀錄——使用者選**要**,方便之後查「昨天有沒有正常同步」。
+  - `second_brain/interface/cli.py` 的 `feeds sync` 加了 `--log-file PATH` 選項。**只是彙總結果,不是逐來源的詳細 log**:新增 `_format_sync_log_line(results)` 把這次同步所有來源的 `added`/`updated` 加總、統計失敗來源數,格式化成一行(例如 `2026-07-13 08:00:00  新增 12 篇、更新 3 篇、失敗 0 個來源`,失敗的話後面接 `:來源名 同步失敗:原因`),用 `--log-file` 給的路徑以 append 模式寫進去。**沒給 `--log-file` 的話行為完全沒變**,這個選項是純粹加值,不影響既有用法。
+  - **排程機制用 Windows 內建工作排程器(Task Scheduler),不是自己寫常駐程式或裝額外的排程套件**:透過 PowerShell 的 `Register-ScheduledTask` 建立一個叫 `SecondBrainFeedsSync` 的排程工作,每天早上 8:00 執行 `.venv\Scripts\python.exe -m second_brain feeds sync --log-file <專案路徑>\data\sync.log`,working directory 設成專案根目錄。**選 Task Scheduler 而不是寫一個 Python 常駐程式**:符合 local-first 原則(不額外引入新的常駐服務/依賴),而且 `config.py` 的 `PROJECT_ROOT` 是用 `Path(__file__).resolve().parent.parent` 算出來的,不依賴呼叫時的工作目錄,所以排程工作用絕對路徑呼叫 `python.exe` 就能正確找到 `data/second_brain.db`,不需要額外處理路徑問題。
+  - **手動觸發驗證過一次真的能動**:用 `Start-ScheduledTask` 手動觸發,一開始檢查 `LastTaskResult` 時看到 `267009`(SCHED_S_TASK_RUNNING,還在跑,不是失敗),多等一下之後變成 `0`(成功),`data/sync.log` 也確實多了一行,不是只看排程有沒有建立就假設會動。**這個排程工作是機器層級的設定,不在 git 裡**,跟 Start Menu 捷徑、`.streamlit/credentials.toml` 一樣是機器特定的東西,換一台機器要重新建立(可以用同一段 `Register-ScheduledTask` PowerShell 指令)。
+  - **已知限制,故意先不處理**:`data/sync.log` 沒有輪替(rotation)機制,每天一行,累積個幾年也才幾千行,對個人用途的檔案大小不是問題,先不做自動清理/輪替。另外這個排程只會在**電腦有開機、使用者有登入**的情況下才會執行(`Register-ScheduledTask` 預設用目前登入的使用者身份、沒有設定「即使使用者未登入也執行」),如果電腦當天沒開機,那天就不會同步,不會有補跑機制——對個人筆電這種使用情境來說是合理的取捨,沒有特別處理「錯過的那天要不要補跑」。
 
 **RSS/Atom ingestion**(CLAUDE.md「更多 ingestion 來源」的第一個):`ingestion/rss_loader.py` 的 `load_feed(feed_url, limit=None) -> list[Document]`,用 `feedparser` 解析 feed,每個 entry 轉成一個 `Document`:
   - `source_path` 用文章的 `link`(dedupe/`remove` 都靠這個欄位比對,語意上等同本機檔案的路徑)
@@ -238,7 +250,7 @@ CLAUDE.md「未來規劃方向」列的:
 
 Hybrid search(關鍵字 + 語意搜尋並用)**第九輪已經做完**,文件分類**第十輪已經做完**,細節都在上面「已經做完的東西」跟「中途做的決策」兩節。
 
-使用者說這些方向都想做,已經照優先順序做完 `remove` → 「更聰明的 dedupe」+「清空知識庫指令」→ 「自動打標籤(殼)」→ 「RSS ingestion」→ 「Streamlit 網頁介面」→「一鍵啟動」→ 「feed 訂閱清單(CLI)」→ 「feed 訂閱清單補進網頁介面」→ 「search/ask 顯示時間 + remove-batch 批次刪除(CLI)」→ 「remove-batch 補進網頁介面」(第五輪)→ 「訂閱真實 RSS 來源」(第六輪)→ 「翻譯成繁體中文 + 時間戳記改 UTC+8」(第七輪)→ 「hybrid search」(第九輪)→ 「訂閱財經 RSS 來源 + 文件分類」(第十輪)→ 「訂閱中文科技 RSS 來源」(第十一輪)→ 「退訂英文科技來源、改訂中文新聞來源」(第十二輪)。
+使用者說這些方向都想做,已經照優先順序做完 `remove` → 「更聰明的 dedupe」+「清空知識庫指令」→ 「自動打標籤(殼)」→ 「RSS ingestion」→ 「Streamlit 網頁介面」→「一鍵啟動」→ 「feed 訂閱清單(CLI)」→ 「feed 訂閱清單補進網頁介面」→ 「search/ask 顯示時間 + remove-batch 批次刪除(CLI)」→ 「remove-batch 補進網頁介面」(第五輪)→ 「訂閱真實 RSS 來源」(第六輪)→ 「翻譯成繁體中文 + 時間戳記改 UTC+8」(第七輪)→ 「hybrid search」(第九輪)→ 「訂閱財經 RSS 來源 + 文件分類」(第十輪)→ 「訂閱中文科技 RSS 來源」(第十一輪)→ 「退訂英文科技來源、改訂中文新聞來源」(第十二輪)→ 「`feeds sync` 排程自動化」(第十三輪)。
 
 ## 下一輪要做的事:還沒決定,先問使用者
 
@@ -248,22 +260,21 @@ Hybrid search(關鍵字 + 語意搜尋並用)**第九輪已經做完**,文件分
 
 候選(不代表優先順序):
 - 更多 ingestion 來源(瀏覽器書籤、Readwise/Instapaper、Obsidian/Notion 匯出)。
-- **YouTube 頻道 RSS**:對話中討論過,使用者問過但決定「先不做」。要注意的是 YouTube 頻道 RSS 只有標題+短描述,**沒有逐字稿**,能做的頂多是「新影片書籤」,不是「影片內容知識庫」;如果之後想做後者,得另外接字幕/逐字稿的來源,不是單純的 RSS ingestion 可以解決的,下次有人提這個要先講清楚這個限制。
 - 關聯筆記推薦、去重複。
 - 網頁介面的細節打磨(新增後自動跳轉、分頁、更明確的操作回饋)——使用者已經開始實際用網頁介面,這些會變得比較有感。
-- **`feeds sync` 排程自動化**:目前要手動打指令才會同步,如果之後想要「每天自動同步一次」,得另外接排程機制(cron/Windows工作排程器),CLAUDE.md 的 MVP 階段明確說「自動化排程」先不做,是刻意排除的範圍,提之前先確認使用者真的想跨出 MVP 範圍。
 - **舊資料的 `tags` 欄位 migration**:把這次修正之前存進去的 ASCII 跳脫格式標籤轉成 `ensure_ascii=False` 格式,讓 `remove-batch --keyword` 對舊文件的標籤比對也能生效。不急,先重新 `add`/`feeds sync` 一次也能解決,只是比較手動。
 - **分類下拉選單/自動建議**:見上面「已知的粗糙邊界」,網頁介面批次設定分類的地方目前是純文字輸入,容易手滑打錯字;可以考慮換成下拉選單 + 新增選項的組合。
 - **更多財經 RSS 來源**:這輪只挑了 3 個(經濟日報/自由時報財經版/Yahoo股市),討論候選時還看過商周財富網(`https://www.businessweekly.com.tw/feedsec.aspx?feedid=10&channelid=15`,已驗證可用但使用者這輪沒選),之後如果想再加可以直接用。
 
 ## 交接檢查清單(接手時建議做的事)
 
-1. `git log --oneline` 確認目前在哪個 commit,`git status --short --branch` 確認有沒有沒 commit 的東西、有沒有 `ahead`/`behind` origin。**這次交接時,第十輪(文件分類)跟第九輪(hybrid search)都已經 commit(`f44d231`/`f0ef6d6`)並 push 上 `origin/master`,工作目錄應該是乾淨的**——第十一輪、第十二輪都沒有改任何程式碼(只有訂閱來源異動,資料本身在 `data/` 底下、`.gitignore` 掉了,不會進 git),只有 `Progress.md` 可能還沒 commit,視交接當下狀態而定先看一下。`.claude/launch.json` 有改過(加 `autoPort: true`),但這個檔案本來就在 `.gitignore` 裡,不會出現在 `git status`,不用理它。
-2. **知識庫裡現在有真實資料,訂閱來源這輪(第十二輪)大換血過**:科技類是 iThome、TechNews 科技新報、DIGITIMES(第十一輪訂的,原本的 The Verge/Hacker News/Simon Willison's Weblog 這三個英文來源已經在第十二輪退訂並刪除所有文章);財經類是經濟日報、自由時報財經版、Yahoo股市(第十輪);新聞類是中央社(國際)、BBC中文網、ETtoday(第十二輪)。`feeds list` 應該看到這 9 個訂閱、`list` 應該看到 109 篇左右的文件,全部都已經分類完畢(科技/財經/新聞三類,沒有未分類的)。手動測試/除錯時要小心別誤刪這些真實訂閱或文章(用 `remove-batch`/`clear`/`set-category` 之前務必先 `list`/`feeds list` 確認)。
-3. **這台機器沒有設 `ANTHROPIC_API_KEY`**:`ask`/`translate` 都還沒被使用者實際跑過,`second-brain translate` 目前只驗證過「沒 key 時清楚報錯退出」這條路徑,還沒驗證過真的翻譯品質。使用者設定 key 之後,建議提醒他跑一次 `second-brain translate` 幫現有文章補翻譯,並抽查幾篇品質。
-4. `./.venv/Scripts/python.exe -m pytest -q` 應該要 106 個全過(第十輪加了 18 個新測試,88 → 106)、~6 秒內跑完
-5. 如果要手動測 `add`/`search`,第一次跑會下載 ~90MB 的 embedding 模型,需要網路;jieba 第一次執行也會在本機建 prefix dict 快取(不用連網,純本機運算,第一次會慢個零點幾秒)
-6. `pyproject.toml` 這輪陸續加了 `jieba>=0.42`、`feedparser>=6.0`、`streamlit>=1.38`(在 `[project.optional-dependencies].ui`,不在預設 `dev` 裡)、`rank_bm25>=0.2`(第九輪,在預設 `dependencies` 裡,不是 optional),**第十輪沒有再加新依賴**,如果是全新環境要記得重新 `pip install -e ".[dev]"`(CLI/測試)跟 `pip install -e ".[ui]"`(網頁介面)
-7. 如果要手動測 `add-feed`/`feeds add` 又不想真的連網,`feedparser.parse()` 吃本機檔案路徑或原始 XML 字串都可以;歷輪已經用多個真實網址(BBC中文網、經濟日報、自由時報財經版、Yahoo股市、iThome、TechNews 科技新報、DIGITIMES、中央社、ETtoday,以及已經退訂的 The Verge/Hacker News/Simon Willison's Weblog)驗證過連網路徑沒問題
-8. 開始功能表有一個「Second Brain」捷徑指向 [run_web.bat](run_web.bat)(這輪在使用者機器上建的,不在 git 裡,取代了原本刪掉的桌面捷徑);如果要驗證雙擊啟動的行為,記得先刪掉 `%USERPROFILE%\.streamlit\credentials.toml` 模擬全新機器,不然「歡迎訊息卡住」那個 bug 修好了沒有根本測不出來
-9. 如果要用瀏覽器自動化測 Streamlit 網頁介面,見「中途做的決策」裡記錄的多筆工具限制筆記(text_input 優先用 `computer` 的 triple_click+type,checkbox 要用 JS 點 `label` 元素,`expander` 沒設 `expanded=True` 會每次 rerun 自動收合,長時間執行的 process 會快取住舊模組、遇到剛加的名稱 `ImportError` 先重啟 process)。**第十輪新增一筆**:如果 `.claude/launch.json` 設定的 `second-brain-web` 這個 server name 剛好被另一個對話 session 佔用同一個 port(8501),`preview_start` 會報衝突——這個設定檔已經加了 `"autoPort": true`,harness 會自動換一個空 port,不用特地處理,只是要注意 `preview_start` 回傳的實際 port 號會變。
+1. `git log --oneline` 確認目前在哪個 commit,`git status --short --branch` 確認有沒有沒 commit 的東西、有沒有 `ahead`/`behind` origin。**這次交接時,第十三輪(`feeds sync` 排程自動化)的程式碼還沒 commit**(第十輪/第九輪已經 commit 進 `f0ef6d6`/`f44d231` 並 push)——`git status` 應該看得到 `second_brain/interface/cli.py` 改過、`tests/interface/test_cli.py` 是新檔案。第十一輪、第十二輪都沒有改任何程式碼(只有訂閱來源異動,資料本身在 `data/` 底下、`.gitignore` 掉了,不會進 git)。`.claude/launch.json` 有改過(加 `autoPort: true`),但這個檔案本來就在 `.gitignore` 裡,不會出現在 `git status`,不用理它。
+2. **這台機器上有一個 Windows 排程工作 `SecondBrainFeedsSync`(第十三輪建的),每天早上 8:00 自動跑 `second-brain feeds sync --log-file data/sync.log`**——這是機器層級設定,不在 git 裡,換一台機器要重新用 `Register-ScheduledTask` 建立(指令見上面「`feeds sync` 排程自動化」決策說明)。想查排程有沒有正常執行,看 `data/sync.log`(每次同步一行,格式:時間戳 + 新增/更新總篇數 + 失敗來源數)或用 `Get-ScheduledTask -TaskName SecondBrainFeedsSync | Get-ScheduledTaskInfo` 查 `LastTaskResult`(0 是成功)。
+3. **知識庫裡現在有真實資料,訂閱來源這輪(第十二輪)大換血過**:科技類是 iThome、TechNews 科技新報、DIGITIMES(第十一輪訂的,原本的 The Verge/Hacker News/Simon Willison's Weblog 這三個英文來源已經在第十二輪退訂並刪除所有文章);財經類是經濟日報、自由時報財經版、Yahoo股市(第十輪);新聞類是中央社(國際)、BBC中文網、ETtoday(第十二輪)。`feeds list` 應該看到這 9 個訂閱、`list` 應該看到 100 多篇文件(排程每天都會跑,篇數會持續變動),全部都已經分類完畢(科技/財經/新聞三類,沒有未分類的)。手動測試/除錯時要小心別誤刪這些真實訂閱或文章(用 `remove-batch`/`clear`/`set-category` 之前務必先 `list`/`feeds list` 確認)。
+4. **這台機器沒有設 `ANTHROPIC_API_KEY`**:`ask`/`translate` 都還沒被使用者實際跑過,`second-brain translate` 目前只驗證過「沒 key 時清楚報錯退出」這條路徑,還沒驗證過真的翻譯品質。使用者設定 key 之後,建議提醒他跑一次 `second-brain translate` 幫現有文章補翻譯,並抽查幾篇品質。
+5. `./.venv/Scripts/python.exe -m pytest -q` 應該要 109 個全過(第十三輪加了 3 個新測試,106 → 109)、~6 秒內跑完
+6. 如果要手動測 `add`/`search`,第一次跑會下載 ~90MB 的 embedding 模型,需要網路;jieba 第一次執行也會在本機建 prefix dict 快取(不用連網,純本機運算,第一次會慢個零點幾秒)
+7. `pyproject.toml` 這輪陸續加了 `jieba>=0.42`、`feedparser>=6.0`、`streamlit>=1.38`(在 `[project.optional-dependencies].ui`,不在預設 `dev` 裡)、`rank_bm25>=0.2`(第九輪,在預設 `dependencies` 裡,不是 optional),**第十三輪沒有再加新依賴**(排程用 Windows 內建的 Task Scheduler,不需要額外套件),如果是全新環境要記得重新 `pip install -e ".[dev]"`(CLI/測試)跟 `pip install -e ".[ui]"`(網頁介面)
+8. 如果要手動測 `add-feed`/`feeds add` 又不想真的連網,`feedparser.parse()` 吃本機檔案路徑或原始 XML 字串都可以;歷輪已經用多個真實網址(BBC中文網、經濟日報、自由時報財經版、Yahoo股市、iThome、TechNews 科技新報、DIGITIMES、中央社、ETtoday,以及已經退訂的 The Verge/Hacker News/Simon Willison's Weblog)驗證過連網路徑沒問題
+9. 開始功能表有一個「Second Brain」捷徑指向 [run_web.bat](run_web.bat)(這輪在使用者機器上建的,不在 git 裡,取代了原本刪掉的桌面捷徑);如果要驗證雙擊啟動的行為,記得先刪掉 `%USERPROFILE%\.streamlit\credentials.toml` 模擬全新機器,不然「歡迎訊息卡住」那個 bug 修好了沒有根本測不出來
+10. 如果要用瀏覽器自動化測 Streamlit 網頁介面,見「中途做的決策」裡記錄的多筆工具限制筆記(text_input 優先用 `computer` 的 triple_click+type,checkbox 要用 JS 點 `label` 元素,`expander` 沒設 `expanded=True` 會每次 rerun 自動收合,長時間執行的 process 會快取住舊模組、遇到剛加的名稱 `ImportError` 先重啟 process)。**第十輪新增一筆**:如果 `.claude/launch.json` 設定的 `second-brain-web` 這個 server name 剛好被另一個對話 session 佔用同一個 port(8501),`preview_start` 會報衝突——這個設定檔已經加了 `"autoPort": true`,harness 會自動換一個空 port,不用特地處理,只是要注意 `preview_start` 回傳的實際 port 號會變。
