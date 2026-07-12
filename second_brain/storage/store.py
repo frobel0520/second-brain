@@ -29,6 +29,10 @@ def list_documents() -> list[DocumentSummary]:
     return sqlite_store.list_documents()
 
 
+def list_all_chunks() -> list[Chunk]:
+    return sqlite_store.list_all_chunks()
+
+
 def get_document(document_id: str) -> Document | None:
     return sqlite_store.get_document(document_id)
 

@@ -4,14 +4,15 @@
 使用方式看 [README.md](README.md),規劃看 [CLAUDE.md](CLAUDE.md)。這份只記錄
 「現在做到哪、為什麼這樣做、接下來大概要做什麼」,每次做完一個階段性任務就更新。
 
-最後更新:2026-07-12(第八輪,對話因為 context window 快滿而在這裡交接)
+最後更新:2026-07-12(第九輪,做完 hybrid search)
 
 ## 現況一句話
 
 CLAUDE.md 的 MVP 加上這些都做完了:`list`/`remove`/`clear`/`add-feed`/自動
 打標籤/Streamlit 網頁介面/一鍵啟動/feed 訂閱清單(CLI+網頁)/`search`/`ask`
 顯示時間/`remove-batch` 批次刪除(CLI+網頁)/UTC+8 時間顯示/翻譯成繁體中文
-(第七輪,已 commit 進 `60009bb` 並 push)。
+(第七輪)/**hybrid search**(第九輪,語意 + BM25 關鍵字搜尋加權合併,見下面
+專節)。**第九輪的程式碼還沒 commit**,交接時記得先確認有沒有人接手 commit。
 
 **第八輪沒有改程式碼,做了兩件事**:(1) 使用者回饋第七輪的翻譯功能「其實好像
 還好」,實際閱讀習慣是「想細看的文章再點進去用 Google 自動翻譯」,不需要整個
@@ -43,7 +44,7 @@ CLAUDE.md 的 MVP 加上這些都做完了:`list`/`remove`/`clear`/`add-feed`/�
 
 1. `second-brain add <file>` — 讀 md/txt → 自動打標籤(本機 jieba 詞頻抽取)→ 切塊 → embedding(本機 sentence-transformers)→ 存 SQLite + ChromaDB。**同一份筆記再 add 一次會先刪舊版本再存新的**(`storage/store.py:replace_existing_document`),不是 append。「同一份筆記」的判斷邏輯之前升級過,見下面決策說明。
 2. `second-brain add-feed <feed_url> [--limit/-n N]` — **一次性**抓取 RSS/Atom 來源,把每篇文章轉成一個 Document,跑同一套 `ingest_document()` 流程(標籤/切塊/embedding/dedupe/存檔),不會記住這個來源。這輪用真實的 BBC News 網址實測過,見下面專節說明。
-3. `second-brain search "<query>" [--top-k K]` — query 轉 embedding → ChromaDB cosine 相似度搜尋 → 印出來源+分數+**加入時間**(第四輪加的,`Document.created_at` 本來就有,只是沒印出來)。
+3. `second-brain search "<query>" [--top-k K]` — **第九輪改成 hybrid search**:語意搜尋(query 轉 embedding → ChromaDB cosine 相似度)+ BM25 關鍵字搜尋兩種分數正規化後加權合併,印出來源+**合併後的分數**+加入時間(時間是第四輪加的,`Document.created_at` 本來就有,只是沒印出來)。細節見下面「hybrid search」專節。
 4. `second-brain ask "<query>" [--top-k K]` — 在 search 結果上組 context,呼叫 Anthropic API(`claude-opus-4-8`,寫死在 `config.ANSWER_MODEL`)做 RAG 問答。**第四輪把 `ask()` 的回傳型別從純字串改成 `AskResult(answer, sources)` dataclass**,CLI 在答案下面多印一段「來源:標題(時間)」清單,見下面決策說明。
 5. `second-brain list` — 列出知識庫裡的文件(標題、片段數、來源路徑、標籤)。
 6. `second-brain remove <source>` — 從知識庫刪除指定來源的紀錄(sqlite + chroma),不動硬碟上的檔案本身。純比對 `source_path`,**不會**做內容比對(remove 是明確指名要刪哪個來源,跟 add 的模糊 dedupe 語意不一樣)。`source` 參數型別**這輪改成 `str`,不是 `Path`**,而且**沒有** `exists=True`,因為要能刪除已經從硬碟上消失的檔案的舊紀錄,也要能刪 RSS 文章的網址(見下面決策說明的 bug 修復)。
@@ -56,6 +57,15 @@ CLAUDE.md 的 MVP 加上這些都做完了:`list`/`remove`/`clear`/`add-feed`/�
 13. `second-brain translate` — **第七輪新加**。幫知識庫裡還沒有翻譯(`translated_content IS NULL`)的文件補上繁體中文翻譯,需要 `ANTHROPIC_API_KEY`。跟 `add`/`add-feed`/`feeds` 的自動翻譯不同,這個指令是使用者主動要求,遇到認證失敗會直接停止並清楚回報(印出跟 `ask` 一樣的「找不到有效的 Anthropic API key」訊息),不會對每篇文件都重複噴出同一個錯誤;其他非認證類的單篇翻譯失敗只計進失敗數,不影響其他篇繼續翻。網頁介面沒有對應功能(批次翻譯可能要跑一段時間,先留在 CLI)。
 
 **自動打標籤**(是「自動化處理」這個大方向的第一小步):`add`/`add-feed` 讀進文件後會呼叫 `processing/tagging.py` 的 `get_tagging_provider().tag(document)`,把結果存進 `Document.tags`(SQLite `documents.tags` 欄位,JSON 字串)。`list`/`add`/`add-feed` 的輸出訊息都會顯示標籤。`TaggingProvider` 是抽象介面(跟 `EmbeddingProvider` 同樣的設計慣例),目前唯一實作是 `KeywordFrequencyTaggingProvider`:用 jieba 斷詞(中文)+ 保留原樣的英文單字,濾掉停用詞,取詞頻最高的前 `config.MAX_TAGS`(預設 5)個當標籤。之後要換成 LLM 分類或規則式邏輯,只要換掉 `get_tagging_provider()` 回傳的實作。
+
+**Hybrid search(第九輪新加)**:解決的問題是語意搜尋對精確詞彙(人名、版本號、專有名詞)容易抓不準——實際案例是知識庫裡 Simon Willison 那篇講 `sqlite-utils 4.1` 套件更新的筆記,搜尋「sqlite-utils」這個精確字串。
+  - **實作前跟使用者確認過兩個細節**(上一輪筆記就寫了「這兩個還沒拍板,下一輪要邊做邊問」):(1) 關鍵字搜尋要不要加 `rank_bm25` 這個新依賴——使用者選**要加**;(2) 語意分數跟 BM25 分數怎麼合併——使用者選**正規化後加權平均**(不是簡單加總原始分數,因為兩種分數尺度天差地遠:cosine 相似度落在 0~1,BM25 分數沒有固定上限)。
+  - `second_brain/retrieval/keyword_search.py` 新增 `keyword_scores(query) -> dict[chunk_id, float]`:把知識庫裡**全部**的 chunk(`storage.list_all_chunks()`,新加的函式,直接查 `chunks` 表)當 BM25 語料,用 `rank_bm25.BM25Okapi` 算分數。**語料是每次查詢即時從 SQLite 撈,沒有另外維護索引**——現有 chunk 數量(幾十篇文章、一兩百個 chunk)量體小,即時算完全夠用,之前筆記就記過不用先假設需要索引結構,實測也證實跑起來很快。
+  - `second_brain/retrieval/search.py` 的 `search()` 改成:向量庫查詢時故意把 `top_k` 開一個很大的數字(`_ALL_CHUNKS_TOP_K = 10_000`)把**所有** chunk 的語意分數都拿到,再跟 BM25 分數(同樣覆蓋全部 chunk)做 min-max 正規化(各自 0~1),依 `config.SEMANTIC_WEIGHT`/`config.KEYWORD_WEIGHT`(預設都 0.5)加權平均,排序後才截斷成呼叫端要的 `top_k`。**為什麼要先撈全部再截斷,不是各自查 top_k 再合併**:如果各自只查 top_k,會漏掉「BM25 排很前面但語意排不進 top_k」或反過來的 chunk,正規化的基準(min/max)也會失真;知識庫量體小,先撈全部不是效能問題。
+  - `search()`/`ask()` 對外的介面完全沒變(呼叫端 `cli.py`/`web.py`/`ask.py` 都不用改),這是刻意的——之前筆記就寫了「這是純粹換掉 `retrieval/search.py` 內部的排序邏輯,不是新增指令」。
+  - **把斷詞邏輯從 `tagging.py` 抽成共用模組** `second_brain/processing/text.py`(`tokenize()` 函式,含 jieba 斷詞 + 停用詞過濾 + 長度/字元過濾),自動標籤跟 BM25 關鍵字搜尋現在共用同一套斷詞規則,不是分別各兜一份——`tagging.py` 原本的 `_tokenize()`/`_STOPWORDS`/`_MEANINGFUL_TOKEN` 整段搬過去,行為完全沒變(舊的 tagging 測試沒改也全過)。
+  - 實測過真實知識庫:`second-brain search "sqlite-utils"` 前五名全部來自那篇 `sqlite-utils 4.1` 文章(分數 1.000 → 0.667),含精確字串的 chunk 排最前面。
+  - **測試踩到一個值得記錄的細節,不是 bug,是 BM25 演算法本身的特性**:一開始寫 `keyword_scores` 的測試只用兩篇文件,結果 BM25 的 idf 剛好算出 0(`log(1.5/1.5) = 0`,corpus 只有兩篇、詞只出現在其中一篇時的數學巧合),測試「碰巧」通過但完全沒驗證到真正的排序邏輯。**改成三篇文件之後 idf 才有意義**,測試才是真的在測東西。**教訓**:BM25 相關的測試至少要三篇以上不同文件的語料,不能只用兩篇,不然 idf 可能算出退化值讓測試變成只是巧合通過。
 
 **RSS/Atom ingestion**(CLAUDE.md「更多 ingestion 來源」的第一個):`ingestion/rss_loader.py` 的 `load_feed(feed_url, limit=None) -> list[Document]`,用 `feedparser` 解析 feed,每個 entry 轉成一個 `Document`:
   - `source_path` 用文章的 `link`(dedupe/`remove` 都靠這個欄位比對,語意上等同本機檔案的路徑)
@@ -148,47 +158,28 @@ CLAUDE.md 的 MVP 加上這些都做完了:`list`/`remove`/`clear`/`add-feed`/�
 - **第七輪:網頁介面的「查看繁體中文翻譯」展開區塊,每次頁面渲染都會對每一篇有翻譯的文件多查一次資料庫**(`get_document(document.id)` 在迴圈裡呼叫,不管使用者有沒有真的展開那個 expander)。對個人用途的文件量(幾十到幾百篇)效能上不是問題,文件量大幅成長的話可以考慮改成真的懶載入(例如用 `st.session_state` 快取或按需查詢)。
 - **第七輪:翻譯的內容長度沒有特別處理**,`max_tokens=4096` 對一般新聞文章長度應該夠,但沒有測過特別長的文章(例如 Ars Technica 的深度報導)會不會被截斷。
 - **第六輪:Hacker News 這類「description 只有佔位文字」的 RSS 來源,存進知識庫的筆記內容永遠只有標題**,沒有摘要或全文,`search`/`ask` 對這些筆記的語意搜尋品質會比有完整內容的來源(例如 BBC News、The Verge)差,可搜尋的文字量很少。這是 HN RSS 設計本身的限制,不是 bug,已知先接受。
+- **第九輪:`SEMANTIC_WEIGHT`/`KEYWORD_WEIGHT` 是寫死在 `config.py` 的常數(各 0.5),沒有讓使用者依查詢調整**,例如明確知道自己在找精確詞彙時沒辦法臨時把關鍵字權重調高。CLI/網頁介面也沒有開關可以「只用語意搜尋」或「只用關鍵字搜尋」——之前的架構(純語意)反而還留在 git 歷史裡,如果之後真的需要可以回頭參考,但目前沒有計畫要做這個開關,先觀察加權平均的效果好不好再說。
+- **第九輪:BM25 語料是「這次查詢當下」即時從 SQLite 撈全部 chunk 現算,沒有快取**:每次 `search()`/`ask()` 都會重新建一次 `BM25Okapi`(掃全部 chunk、重算 idf)。對目前的資料量(一兩百個 chunk)實測起來很快,沒有感覺得到的延遲,但如果知識庫成長到幾千篇文章、上萬個 chunk,這裡會是第一個變慢的地方,到時候可以考慮加快取(例如以「chunk 總數有沒有變」當快取失效條件)。
+- **第九輪:hybrid search 沒有針對「BM25 語料極小(corpus 只有 1~2 篇文件)時 idf 可能算出 0 或負值退化」做特別處理**——寫測試時就踩到這個 BM25 演算法本身的數學特性(見上面決策說明),對知識庫目前的規模(幾十篇)不是問題,但如果使用者的知識庫長期只有極少數幾篇文件,關鍵字排序的效果可能不如預期,語意分數會變成主要的排序依據(這其實也是合理的降級行為,不算 bug)。
 
 ## 接下來可能的方向(還沒決定)
 
 CLAUDE.md「未來規劃方向」列的:
 - 更多 ingestion 來源的其餘部分(瀏覽器書籤、Readwise/Instapaper、Obsidian/Notion 匯出——RSS 這一個已經做完)
-- Hybrid search(關鍵字 + 語意搜尋並用)
 - 自動化處理的其餘部分(關聯筆記推薦、去重複——自動打標籤這一小塊已經做完)
 - Web UI 或 Raycast/Alfred 整合(**Streamlit 網頁介面已經做完基本版,而且使用者本人已經用過**,如果要往「多人使用」或更精緻互動的方向,可能要考慮換成正式 web app)
 
-使用者說這些方向都想做,已經照優先順序做完 `remove` → 「更聰明的 dedupe」+「清空知識庫指令」→ 「自動打標籤(殼)」→ 「RSS ingestion」→ 「Streamlit 網頁介面」→「一鍵啟動」→ 「feed 訂閱清單(CLI)」→ 「feed 訂閱清單補進網頁介面」→ 「search/ask 顯示時間 + remove-batch 批次刪除(CLI)」→ 「remove-batch 補進網頁介面」(第五輪)→ 「訂閱真實 RSS 來源」(第六輪)→ 「翻譯成繁體中文 + 時間戳記改 UTC+8」(第七輪)。
+Hybrid search(關鍵字 + 語意搜尋並用)**第九輪已經做完**,細節見上面「已經做完的東西」跟「中途做的決策」兩節。
 
-## 下一輪要做的事:Hybrid Search
+使用者說這些方向都想做,已經照優先順序做完 `remove` → 「更聰明的 dedupe」+「清空知識庫指令」→ 「自動打標籤(殼)」→ 「RSS ingestion」→ 「Streamlit 網頁介面」→「一鍵啟動」→ 「feed 訂閱清單(CLI)」→ 「feed 訂閱清單補進網頁介面」→ 「search/ask 顯示時間 + remove-batch 批次刪除(CLI)」→ 「remove-batch 補進網頁介面」(第五輪)→ 「訂閱真實 RSS 來源」(第六輪)→ 「翻譯成繁體中文 + 時間戳記改 UTC+8」(第七輪)→ 「hybrid search」(第九輪)。
 
-**這不是候選,是已經確定的下一步**——第八輪問過使用者「要不要做」,解釋完
-具體能改善什麼之後使用者同意了,**下一輪對話開始時直接進實作,不用再問
-方向**。
+## 下一輪要做的事:還沒決定,先問使用者
 
-**問題**:目前 `search`/`ask` 只有語意搜尋(向量相似度,`processing/embedding.py`
-的 `SentenceTransformerEmbeddingProvider`,`all-MiniLM-L6-v2` 模型)。對「概念
-相關」的查詢很準,但對精確詞彙(人名、專有名詞、版本號、特定套件名稱)容易
-抓不準——跟使用者解釋時舉的例子是 Simon Willison 那篇講 `sqlite-utils` 套件
-更新的筆記,搜尋「sqlite-utils」這個精確字串時,語意搜尋不保證會排在最前面。
+跟第八輪不一樣,**這次沒有已經拍板的下一步**——hybrid search 做完之後還沒
+跟使用者討論過接下來要做什麼,下一輪一開始應該先問,不要自己選一個候選就
+直接動工。
 
-**使用者同意的方向**:語意搜尋(現有)+ 關鍵字搜尋兩種一起跑,結果加權合併。
-**還沒跟使用者確認的實作細節**(下一輪開始時要邊做邊定,不是已經拍板的規格):
-- 關鍵字搜尋用什麼實作:討論時提過 `rank_bm25`(純 Python、本機執行、免
-  API key,符合 local-first 原則),但還沒真的裝過、也還沒問過使用者要不要
-  用這個套件——開始實作前應該先確認一下,或至少讓使用者知道會多一個依賴。
-- 兩種分數怎麼加權合併(簡單加總?正規化後加權?)沒有討論過細節。
-- BM25 需要一份可以查詢的語料(所有 chunk 的文字),要確認是每次查詢即時
-  從 SQLite 撈,還是要另外維護一份索引——SQLite 裡 `chunks.content` 已經有
-  資料,現有 chunk 數量(幾十篇文章、可能一兩百個 chunk)量體很小,即時掃
-  應該就夠,不用先假設需要額外的索引結構。
-- `search()`/`ask()` 的對外介面(CLI/網頁介面的呼叫方式)應該不用變,這是
-  純粹換掉 `retrieval/search.py` 內部的排序邏輯,不是新增指令。
-
-**下一輪開始前建議**:先讀這份筆記的「已經做完的東西」跟「中途做的決策」
-兩節,了解現有 `search`/`SearchResult`/`retrieval/search.py` 的介面設計,
-再決定怎麼加關鍵字搜尋這一層,不要憑空重新設計。
-
-候選(不代表優先順序,hybrid search 做完之後可以再從這裡選):
+候選(不代表優先順序):
 - 更多 ingestion 來源(瀏覽器書籤、Readwise/Instapaper、Obsidian/Notion 匯出)。
 - **YouTube 頻道 RSS**:對話中討論過,使用者問過但決定「先不做」。要注意的是 YouTube 頻道 RSS 只有標題+短描述,**沒有逐字稿**,能做的頂多是「新影片書籤」,不是「影片內容知識庫」;如果之後想做後者,得另外接字幕/逐字稿的來源,不是單純的 RSS ingestion 可以解決的,下次有人提這個要先講清楚這個限制。
 - 關聯筆記推薦、去重複。
@@ -198,12 +189,12 @@ CLAUDE.md「未來規劃方向」列的:
 
 ## 交接檢查清單(接手時建議做的事)
 
-1. `git log --oneline` 確認目前在哪個 commit,`git status --short --branch` 確認有沒有沒 commit 的東西、有沒有 `ahead`/`behind` origin(這次交接時,**程式碼全部都已經 commit 進 `60009bb` 並 push 上 `origin/master` 了,工作目錄應該是乾淨的**——第八輪沒有改任何程式碼,只有這份 Progress.md 可能還沒 commit,視交接當下狀態而定,先看一下)。
+1. `git log --oneline` 確認目前在哪個 commit,`git status --short --branch` 確認有沒有沒 commit 的東西、有沒有 `ahead`/`behind` origin。**這次交接時,hybrid search(第九輪)的程式碼還沒 commit**——`git status` 應該看得到 9 個修改過的檔案(`pyproject.toml`、`config.py`、`processing/tagging.py`、`retrieval/search.py`、`storage/__init__.py`/`sqlite_store.py`/`store.py`、`tests/retrieval/test_search.py`、`tests/storage/test_sqlite_store.py`)+ 3 個新檔案(`processing/text.py`、`retrieval/keyword_search.py`、`tests/retrieval/test_keyword_search.py`),視交接當下狀態而定,先看一下有沒有人接手 commit 過。
 2. **知識庫裡現在有真實資料**:第六輪幫使用者訂閱了三個真實 RSS 來源(The Verge、Hacker News、Simon Willison's Weblog),`data/second_brain.db`/`data/chroma/` 不是空的測試資料,手動測試/除錯時要小心別誤刪這些真實訂閱或文章(用 `remove-batch`/`clear` 之前務必先 `list`/`feeds list` 確認)。
 3. **這台機器沒有設 `ANTHROPIC_API_KEY`**:`ask`/`translate` 都還沒被使用者實際跑過,`second-brain translate` 目前只驗證過「沒 key 時清楚報錯退出」這條路徑,還沒驗證過真的翻譯品質。使用者設定 key 之後,建議提醒他跑一次 `second-brain translate` 幫現有 40 幾篇文章補翻譯,並抽查幾篇品質。
-4. `./.venv/Scripts/python.exe -m pytest -q` 應該要 83 個全過、~5 秒內跑完
+4. `./.venv/Scripts/python.exe -m pytest -q` 應該要 88 個全過(第九輪加了 5 個新測試,83 → 88)、~5 秒內跑完
 5. 如果要手動測 `add`/`search`,第一次跑會下載 ~90MB 的 embedding 模型,需要網路;jieba 第一次執行也會在本機建 prefix dict 快取(不用連網,純本機運算,第一次會慢個零點幾秒)
-6. `pyproject.toml` 這輪陸續加了 `jieba>=0.42`、`feedparser>=6.0`、`streamlit>=1.38`(在 `[project.optional-dependencies].ui`,不在預設 `dev` 裡)依賴,如果是全新環境要記得重新 `pip install -e ".[dev]"`(CLI/測試)跟 `pip install -e ".[ui]"`(網頁介面)
+6. `pyproject.toml` 這輪陸續加了 `jieba>=0.42`、`feedparser>=6.0`、`streamlit>=1.38`(在 `[project.optional-dependencies].ui`,不在預設 `dev` 裡)、**`rank_bm25>=0.2`(第九輪,在預設 `dependencies` 裡,不是 optional)**,如果是全新環境要記得重新 `pip install -e ".[dev]"`(CLI/測試)跟 `pip install -e ".[ui]"`(網頁介面)
 7. 如果要手動測 `add-feed`/`feeds add` 又不想真的連網,`feedparser.parse()` 吃本機檔案路徑或原始 XML 字串都可以;這輪也已經用多個真實網址(BBC News、The Verge、Hacker News、Simon Willison's Weblog)驗證過連網路徑沒問題
 8. 開始功能表有一個「Second Brain」捷徑指向 [run_web.bat](run_web.bat)(這輪在使用者機器上建的,不在 git 裡,取代了原本刪掉的桌面捷徑);如果要驗證雙擊啟動的行為,記得先刪掉 `%USERPROFILE%\.streamlit\credentials.toml` 模擬全新機器,不然「歡迎訊息卡住」那個 bug 修好了沒有根本測不出來
 9. 如果要用瀏覽器自動化測 Streamlit 網頁介面,見「中途做的決策」裡記錄的多筆工具限制筆記(text_input 優先用 `computer` 的 triple_click+type,checkbox 要用 JS 點 `label` 元素,`expander` 沒設 `expanded=True` 會每次 rerun 自動收合,長時間執行的 process 會快取住舊模組、遇到剛加的名稱 `ImportError` 先重啟 process)

@@ -28,6 +28,29 @@ def test_insert_document_persists_document_and_chunks(tmp_path: Path) -> None:
     assert chunk_rows == [("chunk-1", 0), ("chunk-2", 1)]
 
 
+def test_list_all_chunks_returns_every_chunk_across_documents(tmp_path: Path) -> None:
+    db_path = tmp_path / "test.db"
+    doc_a = Document(id="doc-a", source_path="/tmp/a.md", title="a", content="hello")
+    doc_b = Document(id="doc-b", source_path="/tmp/b.md", title="b", content="world")
+    sqlite_store.insert_document(
+        doc_a, [Chunk(id="chunk-a", document_id="doc-a", content="hello", chunk_index=0)], db_path=db_path
+    )
+    sqlite_store.insert_document(
+        doc_b, [Chunk(id="chunk-b", document_id="doc-b", content="world", chunk_index=0)], db_path=db_path
+    )
+
+    chunks = sqlite_store.list_all_chunks(db_path=db_path)
+
+    assert {chunk.id for chunk in chunks} == {"chunk-a", "chunk-b"}
+    assert {chunk.content for chunk in chunks} == {"hello", "world"}
+
+
+def test_list_all_chunks_returns_empty_list_when_nothing_stored(tmp_path: Path) -> None:
+    db_path = tmp_path / "test.db"
+
+    assert sqlite_store.list_all_chunks(db_path=db_path) == []
+
+
 def test_get_document_returns_none_when_missing(tmp_path: Path) -> None:
     db_path = tmp_path / "test.db"
 
