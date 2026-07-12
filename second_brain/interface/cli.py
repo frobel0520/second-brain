@@ -9,7 +9,7 @@ from pathlib import Path
 import anthropic
 import typer
 
-from second_brain.config import RSS_DEFAULT_LIMIT
+from second_brain.config import DISPLAY_TIMEZONE, RSS_DEFAULT_LIMIT
 from second_brain.ingestion.loader import load_document
 from second_brain.ingestion.pipeline import (
     FeedSyncResult,
@@ -17,6 +17,7 @@ from second_brain.ingestion.pipeline import (
     ingest_document,
     sync_all_feed_subscriptions,
     sync_feed_subscription,
+    translate_missing_documents,
 )
 from second_brain.ingestion.rss_loader import get_feed_title, load_feed
 from second_brain.retrieval.ask import ask as run_ask
@@ -44,7 +45,7 @@ app.add_typer(feeds_app, name="feeds")
 
 @app.callback()
 def callback() -> None:
-    """add / add-feed / search / ask / list / remove / remove-batch / clear / feeds 幾組指令,強制保留子指令的形式。"""
+    """add / add-feed / search / ask / list / remove / remove-batch / clear / translate / feeds 幾組指令,強制保留子指令的形式。"""
 
 
 def _format_ingest_result(result: IngestResult, location: str) -> str:
@@ -174,7 +175,9 @@ def feeds_list() -> None:
 
     for feed in subscriptions:
         last_synced = (
-            feed.last_synced_at.strftime("%Y-%m-%d %H:%M") if feed.last_synced_at else "尚未同步"
+            feed.last_synced_at.astimezone(DISPLAY_TIMEZONE).strftime("%Y-%m-%d %H:%M")
+            if feed.last_synced_at
+            else "尚未同步"
         )
         typer.echo(f"{feed.name}  (上次同步:{last_synced})")
         typer.echo(f"    {feed.url}")
@@ -226,7 +229,7 @@ def search(
         if len(snippet) > 200:
             snippet = snippet[:200] + "…"
 
-        created = result.document.created_at.strftime("%Y-%m-%d %H:%M")
+        created = result.document.created_at.astimezone(DISPLAY_TIMEZONE).strftime("%Y-%m-%d %H:%M")
         typer.echo(f"\n[{rank}] {result.document.title}  (score={result.score:.3f}, {created})")
         typer.echo(f"    來源: {result.document.source_path}")
         typer.echo(f"    {snippet}")
@@ -251,7 +254,7 @@ def ask(
     if result.sources:
         typer.echo("\n來源:")
         for source in result.sources:
-            created = source.document.created_at.strftime("%Y-%m-%d %H:%M")
+            created = source.document.created_at.astimezone(DISPLAY_TIMEZONE).strftime("%Y-%m-%d %H:%M")
             typer.echo(f"  - {source.document.title}  ({created})")
 
 
@@ -265,9 +268,12 @@ def list_command() -> None:
         raise typer.Exit(code=0)
 
     for document in documents:
-        created = document.created_at.strftime("%Y-%m-%d %H:%M")
+        created = document.created_at.astimezone(DISPLAY_TIMEZONE).strftime("%Y-%m-%d %H:%M")
         tag_suffix = f"  [{', '.join(document.tags)}]" if document.tags else ""
-        typer.echo(f"{created}  {document.title}  ({document.chunk_count} 個片段){tag_suffix}")
+        translation_suffix = "  🇹🇼已翻譯" if document.has_translation else ""
+        typer.echo(
+            f"{created}  {document.title}  ({document.chunk_count} 個片段){tag_suffix}{translation_suffix}"
+        )
         typer.echo(f"    {document.source_path}")
 
 
@@ -337,7 +343,8 @@ def remove_batch(
 
     typer.echo(f"符合條件的文件共 {len(matches)} 筆:")
     for document in matches:
-        typer.echo(f"  {document.created_at:%Y-%m-%d %H:%M}  {document.title}  ({document.source_path})")
+        created = document.created_at.astimezone(DISPLAY_TIMEZONE)
+        typer.echo(f"  {created:%Y-%m-%d %H:%M}  {document.title}  ({document.source_path})")
 
     if not yes:
         confirmed = typer.confirm(f"確定要刪除這 {len(matches)} 筆文件嗎?這個動作無法復原。")
@@ -362,6 +369,29 @@ def clear(
 
     removed_count = clear_all()
     typer.echo(f"已清空知識庫,共移除 {removed_count} 份文件。")
+
+
+@app.command()
+def translate() -> None:
+    """幫知識庫裡還沒有翻譯的文件補上繁體中文翻譯,需要 `ANTHROPIC_API_KEY`。
+
+    `add`/`add-feed`/`feeds` 系列指令已經會自動翻譯新加入的文件(失敗會靜默
+    跳過,不擋 ingestion);這個指令是用來補翻譯「當初沒設 API key、或翻譯
+    當下失敗」的舊文件。
+    """
+    result = translate_missing_documents()
+
+    if result.auth_error is not None:
+        if result.translated:
+            typer.echo(f"已翻譯 {result.translated} 篇。")
+        typer.echo("找不到有效的 Anthropic API key,請設定環境變數 ANTHROPIC_API_KEY 後再試一次。")
+        raise typer.Exit(code=1)
+
+    if result.translated == 0 and result.failed == 0:
+        typer.echo("沒有需要翻譯的文件。")
+        raise typer.Exit(code=0)
+
+    typer.echo(f"完成:{result.translated} 篇已翻譯,{result.failed} 篇失敗。")
 
 
 if __name__ == "__main__":

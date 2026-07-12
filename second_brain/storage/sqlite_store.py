@@ -18,7 +18,8 @@ CREATE TABLE IF NOT EXISTS documents (
     content TEXT NOT NULL,
     created_at TEXT NOT NULL,
     metadata TEXT NOT NULL,
-    tags TEXT NOT NULL DEFAULT '[]'
+    tags TEXT NOT NULL DEFAULT '[]',
+    translated_content TEXT
 );
 
 CREATE TABLE IF NOT EXISTS chunks (
@@ -43,7 +44,19 @@ def _connect(db_path: Path | None = None) -> sqlite3.Connection:
     ensure_data_dir()
     conn = sqlite3.connect(db_path or SQLITE_PATH)
     conn.executescript(_SCHEMA)
+    _ensure_translated_content_column(conn)
     return conn
+
+
+def _ensure_translated_content_column(conn: sqlite3.Connection) -> None:
+    """幫既有(在這欄位存在之前建立的)資料庫補上 `translated_content` 欄位。
+
+    `CREATE TABLE IF NOT EXISTS` 不會幫已經存在的資料表補欄位,SQLite 也沒有
+    `ADD COLUMN IF NOT EXISTS`,所以用 `PRAGMA table_info` 自己檢查。
+    """
+    columns = {row[1] for row in conn.execute("PRAGMA table_info(documents)")}
+    if "translated_content" not in columns:
+        conn.execute("ALTER TABLE documents ADD COLUMN translated_content TEXT")
 
 
 def insert_document(document: Document, chunks: list[Chunk], db_path: Path | None = None) -> None:
@@ -51,8 +64,9 @@ def insert_document(document: Document, chunks: list[Chunk], db_path: Path | Non
     try:
         with conn:
             conn.execute(
-                "INSERT INTO documents (id, source_path, title, content, created_at, metadata, tags) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                "INSERT INTO documents "
+                "(id, source_path, title, content, created_at, metadata, tags, translated_content) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     document.id,
                     document.source_path,
@@ -61,6 +75,7 @@ def insert_document(document: Document, chunks: list[Chunk], db_path: Path | Non
                     document.created_at.isoformat(),
                     json.dumps(document.metadata, ensure_ascii=False),
                     json.dumps(document.tags, ensure_ascii=False),
+                    document.translated_content,
                 ),
             )
             conn.executemany(
@@ -82,7 +97,7 @@ def insert_document(document: Document, chunks: list[Chunk], db_path: Path | Non
 
 
 def _row_to_document(row: tuple) -> Document:
-    doc_id, source_path, title, content, created_at, metadata, tags = row
+    doc_id, source_path, title, content, created_at, metadata, tags, translated_content = row
     return Document(
         id=doc_id,
         source_path=source_path,
@@ -91,6 +106,7 @@ def _row_to_document(row: tuple) -> Document:
         created_at=datetime.fromisoformat(created_at),
         metadata=json.loads(metadata),
         tags=json.loads(tags),
+        translated_content=translated_content,
     )
 
 
@@ -98,8 +114,8 @@ def get_document(document_id: str, db_path: Path | None = None) -> Document | No
     conn = _connect(db_path)
     try:
         row = conn.execute(
-            "SELECT id, source_path, title, content, created_at, metadata, tags FROM documents "
-            "WHERE id = ?",
+            "SELECT id, source_path, title, content, created_at, metadata, tags, translated_content "
+            "FROM documents WHERE id = ?",
             (document_id,),
         ).fetchone()
     finally:
@@ -112,8 +128,8 @@ def get_document_by_source_path(source_path: str, db_path: Path | None = None) -
     conn = _connect(db_path)
     try:
         row = conn.execute(
-            "SELECT id, source_path, title, content, created_at, metadata, tags FROM documents "
-            "WHERE source_path = ?",
+            "SELECT id, source_path, title, content, created_at, metadata, tags, translated_content "
+            "FROM documents WHERE source_path = ?",
             (source_path,),
         ).fetchone()
     finally:
@@ -126,8 +142,8 @@ def get_document_by_content(content: str, db_path: Path | None = None) -> Docume
     conn = _connect(db_path)
     try:
         row = conn.execute(
-            "SELECT id, source_path, title, content, created_at, metadata, tags FROM documents "
-            "WHERE content = ?",
+            "SELECT id, source_path, title, content, created_at, metadata, tags, translated_content "
+            "FROM documents WHERE content = ?",
             (content,),
         ).fetchone()
     finally:
@@ -140,7 +156,8 @@ def list_documents(db_path: Path | None = None) -> list[DocumentSummary]:
     conn = _connect(db_path)
     try:
         rows = conn.execute(
-            "SELECT d.id, d.title, d.source_path, d.created_at, d.tags, COUNT(c.id) "
+            "SELECT d.id, d.title, d.source_path, d.created_at, d.tags, COUNT(c.id), "
+            "d.translated_content IS NOT NULL "
             "FROM documents d LEFT JOIN chunks c ON c.document_id = d.id "
             "GROUP BY d.id ORDER BY d.created_at"
         ).fetchall()
@@ -155,6 +172,7 @@ def list_documents(db_path: Path | None = None) -> list[DocumentSummary]:
             created_at=datetime.fromisoformat(row[3]),
             tags=json.loads(row[4]),
             chunk_count=row[5],
+            has_translation=bool(row[6]),
         )
         for row in rows
     ]
@@ -178,6 +196,31 @@ def delete_document(document_id: str, db_path: Path | None = None) -> None:
         with conn:
             conn.execute("DELETE FROM chunks WHERE document_id = ?", (document_id,))
             conn.execute("DELETE FROM documents WHERE id = ?", (document_id,))
+    finally:
+        conn.close()
+
+
+def list_documents_missing_translation(db_path: Path | None = None) -> list[Document]:
+    conn = _connect(db_path)
+    try:
+        rows = conn.execute(
+            "SELECT id, source_path, title, content, created_at, metadata, tags, translated_content "
+            "FROM documents WHERE translated_content IS NULL ORDER BY created_at"
+        ).fetchall()
+    finally:
+        conn.close()
+
+    return [_row_to_document(row) for row in rows]
+
+
+def update_translated_content(document_id: str, translated_content: str, db_path: Path | None = None) -> None:
+    conn = _connect(db_path)
+    try:
+        with conn:
+            conn.execute(
+                "UPDATE documents SET translated_content = ? WHERE id = ?",
+                (translated_content, document_id),
+            )
     finally:
         conn.close()
 

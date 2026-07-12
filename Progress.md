@@ -4,34 +4,42 @@
 使用方式看 [README.md](README.md),規劃看 [CLAUDE.md](CLAUDE.md)。這份只記錄
 「現在做到哪、為什麼這樣做、接下來大概要做什麼」,每次做完一個階段性任務就更新。
 
-最後更新:2026-07-12(第六輪)
+最後更新:2026-07-12(第七輪)
 
 ## 現況一句話
 
 CLAUDE.md 的 MVP 加上這些都做完了:`list`/`remove`/`clear`/`add-feed`/自動
 打標籤/Streamlit 網頁介面/一鍵啟動/feed 訂閱清單(CLI+網頁)/`search`/`ask`
-顯示時間/`remove-batch` 批次刪除(CLI+網頁)。第五輪的網頁批次刪除已經
-commit(`19f9994`)並 push 上 `origin/master` 了。**這輪(第六輪)不是新功能,
-是實際使用這個知識庫**:使用者請我找科技業相關、能用 RSS 抓的電子報,我先
-搜尋+用 `get_feed_title()` 實測驗證了 10 個候選網址的可用性(TechCrunch/The
-Verge/Ars Technica/Wired/MIT Technology Review/IEEE Spectrum/Hacker News/
-Simon Willison's Weblog/The Pragmatic Engineer/JavaScript Weekly,全部驗證
-過真的能解析),整理成內容/風格對照表給使用者挑,使用者選了 The Verge、
-Hacker News、Simon Willison's Weblog 三個,用 `feeds add` 幫忙訂閱。
+顯示時間/`remove-batch` 批次刪除(CLI+網頁)。第六輪幫使用者訂閱了 The
+Verge、Hacker News、Simon Willison's Weblog 三個真實 RSS 來源,順便修掉一個
+HN 內容過短導致 dedupe 互撞、資料遺失的 bug(已 commit 進 `5e8e74f` 並
+push)。**這輪(第七輪)使用者提了兩個需求**:(1) 幫已經抓下來的文章加上
+繁體中文翻譯,(2) 時間戳記從 UTC 改成 UTC+8 顯示。
 
-**訂閱 Hacker News 時意外踩到、也修掉一個真的會造成資料遺失的 bug**:HN 的
-RSS `<description>` 對每一篇文章都只有「Comments」這幾個字(不是真正的文章
-摘要),而 `add`/`ingest_document` 既有的 dedupe 邏輯在「同路徑找不到,退回比對
-內容是否完全相同」這一步,會把同一批裡所有內容都是「Comments」的文章互相
-誤判成「同一篇改名」,一篇篇疊代覆蓋——實測 5 篇 HN 文章最後**只剩最後處理
-的 1 篇存活,其他 4 篇被靜默蓋掉,沒有任何錯誤訊息**。已經在
-`rss_loader.py` 修好(內容長度低於 20 字就退回用標題當內容,標題天生就不會
-互撞),加了測試,清掉損毀的舊資料後重新 `feeds sync` 一次,確認 10 篇 HN
-文章全部正確、各自獨立地存進去了。72 個測試全過(新增 1 個涵蓋這個 fallback
-的測試)。**這輪的 `rss_loader.py` 修復還沒 commit**,使用者實際訂閱到的
-三個來源(The Verge/Hacker News/Simon Willison's Weblog)資料已經在本機
-知識庫裡,不影響 commit 與否——但這個 bug 修復本身應該要進 git,下一個對話
-開始時記得先確認要不要 commit + push。
+**時間戳記**:資料庫繼續存 UTC(沒有改資料),新增 `config.DISPLAY_TIMEZONE`
+(UTC+8),`cli.py`/`web.py` 所有顯示時間的地方(`list`/`search`/`ask`/
+`feeds list`/`remove-batch` 預覽/網頁介面對應位置,共 10 處)都在顯示前
+`.astimezone(DISPLAY_TIMEZONE)`。手動驗證過真實資料轉換正確(UTC 17:45 →
+顯示 01:45 次日,UTC 03:57 → 顯示 11:57 當天)。
+
+**翻譯**:問過使用者兩個設計問題後決定——(1) 現有 40 篇 + 以後新增的都自動
+翻,(2) 另存 `Document.translated_content` 新欄位,原文 `content` 不動
+(不影響 embedding/chunking/search 的語意搜尋品質)。新增
+`processing/translation.py`(`TranslationProvider` 抽象介面 + Anthropic API
+實作,跟 embedding/tagging 同樣的設計慣例),`ingest_document()` 自動嘗試
+翻譯、失敗就靜默跳過不擋 ingestion(`add`/`add-feed`/`feeds` 系列指令本來
+就不需要 API key),新增 `second-brain translate` 指令補翻譯舊文件(這個
+指令反過來,遇到認證失敗會直接停止並清楚回報,不會靜默略過)。SQLite
+schema 用真的 `ALTER TABLE` migration 幫舊資料庫補欄位(這個專案第一次沒有
+要求使用者砍掉資料庫重建)。**這台機器沒有設 `ANTHROPIC_API_KEY`,翻譯功能
+還沒辦法實際跑起來驗證翻譯品質**,只驗證過「沒 key 時優雅降級,不擋
+ingestion/清楚回報」這條路徑,真正的翻譯輸出（繁體中文品質、語氣、格式）
+使用者自己設定 key 之後要自己確認一次。83 個測試全過(新增 11 個涵蓋
+翻譯的 sqlite/pipeline 測試)。**這輪的變更還沒 commit**,下一個對話開始時
+記得先確認要不要 commit + push。**過程中兩次遇到 Streamlit 長時間執行的
+process 快取住舊版 `second_brain.config`/`second_brain.storage` 模組、
+import 新增的名稱失敗,都是重啟 Streamlit 進程解決,不是程式碼問題**,見下面
+決策說明。
 
 ## 環境
 
@@ -46,7 +54,7 @@ RSS `<description>` 對每一篇文章都只有「Comments」這幾個字(不是
 
 ## 已經做完的東西
 
-十二個 CLI 指令全部能動,架構細節看 [README.md](README.md#架構):
+十三個 CLI 指令全部能動,架構細節看 [README.md](README.md#架構):
 
 1. `second-brain add <file>` — 讀 md/txt → 自動打標籤(本機 jieba 詞頻抽取)→ 切塊 → embedding(本機 sentence-transformers)→ 存 SQLite + ChromaDB。**同一份筆記再 add 一次會先刪舊版本再存新的**(`storage/store.py:replace_existing_document`),不是 append。「同一份筆記」的判斷邏輯之前升級過,見下面決策說明。
 2. `second-brain add-feed <feed_url> [--limit/-n N]` — **一次性**抓取 RSS/Atom 來源,把每篇文章轉成一個 Document,跑同一套 `ingest_document()` 流程(標籤/切塊/embedding/dedupe/存檔),不會記住這個來源。這輪用真實的 BBC News 網址實測過,見下面專節說明。
@@ -60,6 +68,7 @@ RSS `<description>` 對每一篇文章都只有「Comments」這幾個字(不是
 10. `second-brain feeds remove <feed_url>` — 從訂閱清單移除來源(刪 `feeds` 表那一列),**不會**動到已經加入知識庫的文章——訂閱清單只是「要不要繼續追蹤」的紀錄,跟文章本身是否留在知識庫是兩件事,要連文章一起刪要另外用 `second-brain remove <文章網址>`。
 11. `second-brain feeds sync [--limit/-n N]` — 同步訂閱清單裡的**所有**來源:對每個訂閱依序呼叫 `sync_feed_subscription()`,更新 `last_synced_at`,印出每個來源「新增 X 篇、更新 Y 篇、略過 Z 篇」。**單一來源抓取/解析失敗不會擋住其他來源**——`pipeline.sync_feed_subscription()` 把例外包進 `FeedSyncResult.error`,不會往外拋,`feeds sync` 對每個來源印出「同步失敗:{原因}」後繼續處理下一個。
 12. `second-brain remove-batch [--after DATE] [--before DATE] [--keyword K] [--source S] [--yes/-y]` — 依日期範圍/關鍵字/來源批次刪除文件,三個條件是**使用者要求的 OR**(符合任一個就刪,不是同時符合),`--after`/`--before` 兩個一起給是例外、彼此是 AND(定義一段區間)。**至少要給一個條件**,不然要用 `clear`。刪除前會列出符合的文件並要求確認(跟 `clear` 同樣的安全機制,`--yes` 可跳過)。日期格式是 `YYYY-MM-DD`,格式錯會被 typer 擋下來,不會靜默失敗。底層是 `storage/sqlite_store.py:find_documents()`,用動態組出的 `WHERE (cond1) OR (cond2) OR (cond3)` 查詢,`storage.remove_documents(ids)` 批次刪。**第五輪在網頁介面「瀏覽」分頁下方加了對應的批次刪除區塊**,同一套底層函式,UX 是「篩選條件 → 預覽符合的文件 → 勾選確認 → 刪除這些文件」四步驟,細節見下面決策說明。
+13. `second-brain translate` — **第七輪新加**。幫知識庫裡還沒有翻譯(`translated_content IS NULL`)的文件補上繁體中文翻譯,需要 `ANTHROPIC_API_KEY`。跟 `add`/`add-feed`/`feeds` 的自動翻譯不同,這個指令是使用者主動要求,遇到認證失敗會直接停止並清楚回報(印出跟 `ask` 一樣的「找不到有效的 Anthropic API key」訊息),不會對每篇文件都重複噴出同一個錯誤;其他非認證類的單篇翻譯失敗只計進失敗數,不影響其他篇繼續翻。網頁介面沒有對應功能(批次翻譯可能要跑一段時間,先留在 CLI)。
 
 **自動打標籤**(是「自動化處理」這個大方向的第一小步):`add`/`add-feed` 讀進文件後會呼叫 `processing/tagging.py` 的 `get_tagging_provider().tag(document)`,把結果存進 `Document.tags`(SQLite `documents.tags` 欄位,JSON 字串)。`list`/`add`/`add-feed` 的輸出訊息都會顯示標籤。`TaggingProvider` 是抽象介面(跟 `EmbeddingProvider` 同樣的設計慣例),目前唯一實作是 `KeywordFrequencyTaggingProvider`:用 jieba 斷詞(中文)+ 保留原樣的英文單字,濾掉停用詞,取詞頻最高的前 `config.MAX_TAGS`(預設 5)個當標籤。之後要換成 LLM 分類或規則式邏輯,只要換掉 `get_tagging_provider()` 回傳的實作。
 
@@ -125,6 +134,11 @@ RSS `<description>` 對每一篇文章都只有「Comments」這幾個字(不是
 - **第五輪:Streamlit 的 `st.checkbox` 用 react-aria 做無障礙處理,真正的 `<input type="checkbox">` 被 `clip-path` 視覺隱藏,直接點擊/`.click()` 都不會觸發**:用 `read_page` 拿到的 checkbox ref 定位去點,或用 `javascript_tool` 對 input 元素本身呼叫 `.click()`,DOM 的 `checked` 屬性都沒有變化,Python 端的 `st.checkbox()` 也讀不到勾選狀態。查了 DOM 結構才發現真正的 `<input>` 包在一個 `clip-path: inset(50%)` 的 `<span>` 裡(視覺上完全隱藏,只留給螢幕閱讀器用),畫面上看到的方框圖示是另一個 `aria-hidden` 的裝飾元素,不是可互動的 DOM 節點。**有效的作法**:用 `javascript_tool` 找到 checkbox 的 `closest('label')`,對這個 `<label>` 呼叫 `.click()`——HTML 原生的 `<label>` 點擊會自動委派給它包住的表單元件並觸發正常的 `click`/`change` 事件,這是瀏覽器原生行為,不受 react-aria 的自訂事件處理影響。**以後在這個專案測 Streamlit checkbox,直接跳過點 input/point 座標這條路,用 JS 點 `label` 元素**。
 - **第六輪(真的會造成資料遺失的 bug):RSS 來源的內容太短時,dedupe 邏輯會把不同文章互相誤判成「同一篇改名」**:訂閱 Hacker News 時發現 5 篇文章 `feeds add` 完只剩 1 篇存活。追根究底是 HN 的 RSS `<description>` 對每篇文章都只放「Comments」這幾個字(連到討論串的佔位文字,不是文章摘要),`ingest_document()` 的 dedupe(`storage/store.py:replace_existing_document`)在「同路徑找不到」時會退回比對 `content` 是否完全相同——同一批次裡每篇 HN 文章的 `content` 都是一模一樣的「Comments」,所以每加一篇新的,就會被判定成「跟前一篇是同一份筆記改名」,把前一篇的資料整個取代掉,如此連環覆蓋,一批 N 篇最後只剩 1 篇。**這個 bug 不是這次新出現的——從 `add-feed`/`feeds` 系列指令一開始做出來就存在,只是先前測試用的 BBC 新聞/自己寫的測試筆記,內容都夠長夠獨特,沒有踩到過**;這次是實際訂閱一個「description 天生很短」的真實來源才第一次暴露出來,再次印證「用真實資料測試比自己編的測試資料更容易發現邊界案例」這個之前已經在 RSS ingestion 那輪學到的教訓。**修法**:`rss_loader.py` 新增 `_MIN_CONTENT_LENGTH = 20`,`_entry_to_document()` 抽出來的內容如果比這個短,就退回用文章標題當內容——標題天生逐篇不同,不會互撞,同時也不用去改共用的 `replace_existing_document()` dedupe 邏輯(那段邏輯服務所有 ingestion 來源,是共用機制,改了影響面太廣,問題其實出在「餵給它的內容太廉價/太短」這個上游,修上游比較安全)。**已經清掉損毀的舊資料(單獨存活的那篇 HN 文章)、重新 `feeds sync` 一次,確認 10 篇 HN 文章這次全部正確分開存進去了**。**這個修法的已知限制**:HN 這類「RSS 沒有真正內容,只有標題+連結」的來源,存進知識庫的筆記內容永遠只有標題本身,不會有摘要或全文——這是 HN RSS 設計本身的限制,不是這個修法能解決的,`search`/`ask` 對這類筆記的語意搜尋品質會比有完整內容的筆記差(可搜尋的文字只有標題那幾個字)。
 
+- **第七輪:翻譯功能的兩個設計問題都問過使用者,不是自己假設**:「要翻現有的還是也要自動翻以後新增的」跟「翻譯要取代原文還是另存」這兩個都是有明顯不同後果的分岔(前者影響 API 成本跟行為範圍,後者直接影響既有 embedding/search 品質會不會被動到),先問過再做,使用者選「都自動翻」+「另存,原文不動」。**這是使用者確認過的設計,不是我自己拍板的**,以後如果要改行為要重新確認。
+- **第七輪:自動翻譯(`ingest_document()` 內)跟主動翻譯(`translate` 指令)的錯誤處理刻意不一樣**:自動翻譯失敗要「靜默跳過,不擋 ingestion」——因為 `add`/`add-feed`/`feeds` 這些指令長期以來的不變量是「不需要 Anthropic API key 也能動」,如果自動翻譯失敗就讓整個 ingestion 掛掉,等於把翻譯變成新的隱性必要條件,破壞了這個不變量,使用者甚至可能沒發現自己的筆記加不進去是因為翻譯失敗。`translate` 指令則相反,使用者是「明確要求翻譯」,失敗理應清楚回報,而且遇到認證失敗這種對整批文件都會重複發生的錯誤,直接停止比一篇篇跑完再列出 N 個一樣的錯誤訊息更合理。兩條路徑用同一個 `TranslationProvider`,差別只在呼叫端怎麼處理例外。
+- **第七輪:`translated_content` 用真的 `ALTER TABLE` migration,不是要求砍掉資料庫重建**:這個專案先前加欄位(`tags`)、加資料表(`feeds`)都沒做過真的 migration,遇到舊資料庫沒有新欄位時的做法是「反正是空的測試資料庫,砍掉重建」,那次的決策筆記裡也明講「如果使用者已經囤了真實筆記,刪重建就會把知識庫清空」是還沒解決的風險。這次使用者已經有 40 篇真實資料(訂閱的三個 RSS 來源),砍掉重建不是選項,所以寫了 `_ensure_translated_content_column()`:每次連線用 `PRAGMA table_info` 檢查欄位存不存在,不存在才補一次 `ALTER TABLE ADD COLUMN`。已經拿真實的 `data/second_brain.db`(舊 schema)實測過,`list` 指令跑起來沒有任何錯誤,40 篇資料都還在。**這是這個專案第一次做真的 schema migration,之後如果還要加欄位,照這個模式做就好**,不用再讓使用者選擇「刪掉重來」。
+- **第七輪:兩次遇到 Streamlit 長時間執行的 process 快取住舊版模組,`ImportError: cannot import name X`,不是真的程式碼 bug**:這輪對 `config.py` 加 `DISPLAY_TIMEZONE`、對 `storage/__init__.py` 加 `get_document` 之後,瀏覽器裡看到的 Streamlit 頁面各噴了一次 `ImportError`——實際檢查過原始檔案,兩次改動都確實寫進磁碟上的 `.py` 檔案了,問題出在**這個 Streamlit process 是長時間執行、沒有重啟過的舊進程**(從更早的對話輪次就一直開著),Python 的 `sys.modules` 快取住了它第一次 import 當下的 `second_brain.config`/`second_brain.storage` 模組物件,Streamlit 的檔案監看/自動重跑機制會重新執行 `web.py` 的頂層程式碼,但**不會**強制重新 import 已經在 `sys.modules` 裡的套件模組,所以新加的名稱在那個舊 process 裡永遠找不到。**修法**:直接用 `Stop-Process` 砍掉舊 process,再用 `preview_start` 重開一個全新的,全新 process 的 `sys.modules` 是乾淨的,重新 import 就會拿到磁碟上最新的程式碼。**教訓,以後遇到類似情況可以參考**:如果改了 `.py` 檔案、確認過磁碟內容是對的,但瀏覽器裡的 Streamlit 還是報「找不到某個剛加的名稱」的 `ImportError`,不用懷疑檔案寫壞了,先假設是長時間執行的 process 快取住舊模組,直接重啟 process 通常就解決,不用花時間除錯「為什麼檔案明明是對的卻導不進去」。
+
 ## 已知的粗糙邊界(還沒處理,不算 bug,是刻意先跳過)
 
 - `add` 的 dedupe 現在是「路徑相同」或「內容完全相同」任一命中就算同一份筆記。**路徑跟內容同時變的情況還是抓不到**(見上面決策說明),舊紀錄會變孤兒,要靠 `remove`/`clear` 手動清。
@@ -144,6 +158,10 @@ RSS `<description>` 對每一篇文章都只有「Comments」這幾個字(不是
 - **第五輪:網頁介面批次刪除的「預覽符合的文件」結果存在 `st.session_state`,切換分頁或做其他操作不會自動清掉**,如果使用者預覽完之後跑去別的分頁刪了某篇筆記、又切回來直接勾確認刪除,實際刪除時是照「當初預覽的那份清單」執行(`remove_documents()` 用的是預覽當下記下的 id 列表),已經被刪掉的 id 會被 `remove_documents()` 靜默略過(`sqlite_store.get_document(id)` 找不到就跳過,不會報錯),不會導致誤刪別的東西,但如果知識庫在預覽之後有新增符合條件的文件,不會自動出現在待刪清單裡,要重新按一次「預覽符合的文件」才會抓到最新結果。
 - **第四輪:`remove-batch` 的 `--after`/`--before` 只支援 `YYYY-MM-DD` 絕對日期,沒有「N 天前」這種相對日期的簡寫**,要刪「30 天前的文章」得自己算出日期字串。之後如果常用可以加 `--older-than-days N` 這種語法糖,MVP 先不做。
 - **第四輪:`remove-batch --keyword` 對這次修正之前就存在的舊資料,標籤比對不到中文**(`tags` 欄位還是舊的 `ensure_ascii=True` 跳脫格式),標題/內容欄位不受影響。見上面「決策」段落的詳細說明,要嘛重新 `add`/`feeds sync`,要嘛之後寫一次性 migration script。
+- **第七輪:翻譯功能還沒有實際跑過真的翻譯,只驗證過「沒 key 時的優雅降級」路徑**:這台機器沒有設 `ANTHROPIC_API_KEY`,`second-brain translate`/自動翻譯都還沒真的呼叫過 Anthropic API 拿到過翻譯結果——已驗證的是「沒 key 時 `add` 照常運作、`translate` 清楚報錯退出」這條路徑,**還沒驗證過的是**:真的翻譯出來的繁體中文品質好不好、`TRANSLATION_SYSTEM_PROMPT` 的指示夠不夠清楚、長文章會不會被 `max_tokens=4096` 截斷。使用者設定 key 之後第一次跑 `translate` 或 `add`,建議抽查幾篇的 `translated_content` 品質,不要假設一定沒問題。
+- **第七輪:`translate` 指令/自動翻譯沒有記錄「翻譯失敗的原因」**,只有 `translate` 指令當下印出來的訊息,沒有存進資料庫或 log,失敗的文件下次執行 `translate` 只是「再試一次」,不會知道上次為什麼失敗(除非剛好還記得當時的輸出)。
+- **第七輪:網頁介面的「查看繁體中文翻譯」展開區塊,每次頁面渲染都會對每一篇有翻譯的文件多查一次資料庫**(`get_document(document.id)` 在迴圈裡呼叫,不管使用者有沒有真的展開那個 expander)。對個人用途的文件量(幾十到幾百篇)效能上不是問題,文件量大幅成長的話可以考慮改成真的懶載入(例如用 `st.session_state` 快取或按需查詢)。
+- **第七輪:翻譯的內容長度沒有特別處理**,`max_tokens=4096` 對一般新聞文章長度應該夠,但沒有測過特別長的文章(例如 Ars Technica 的深度報導)會不會被截斷。
 - **第六輪:Hacker News 這類「description 只有佔位文字」的 RSS 來源,存進知識庫的筆記內容永遠只有標題**,沒有摘要或全文,`search`/`ask` 對這些筆記的語意搜尋品質會比有完整內容的來源(例如 BBC News、The Verge)差,可搜尋的文字量很少。這是 HN RSS 設計本身的限制,不是 bug,已知先接受。
 
 ## 接下來可能的方向(還沒決定)
@@ -154,7 +172,7 @@ CLAUDE.md「未來規劃方向」列的:
 - 自動化處理的其餘部分(關聯筆記推薦、去重複——自動打標籤這一小塊已經做完)
 - Web UI 或 Raycast/Alfred 整合(**Streamlit 網頁介面已經做完基本版,而且使用者本人已經用過**,如果要往「多人使用」或更精緻互動的方向,可能要考慮換成正式 web app)
 
-使用者說這些方向都想做,已經照優先順序做完 `remove` → 「更聰明的 dedupe」+「清空知識庫指令」→ 「自動打標籤(殼)」→ 「RSS ingestion」→ 「Streamlit 網頁介面」→「一鍵啟動」→ 「feed 訂閱清單(CLI)」→ 「feed 訂閱清單補進網頁介面」→ 「search/ask 顯示時間 + remove-batch 批次刪除(CLI)」→ 「remove-batch 補進網頁介面」(第五輪)。**第六輪不是新功能開發,是使用者第一次真的拿這個工具來用**:請我找科技業 RSS 來源、訂閱了三個,順便暴露並修掉一個既有的 dedupe bug(見上面決策說明)。**下一個對話開始時,建議問使用者接下來要做哪個**,不要自己選,除非使用者又直接提了具體需求。**hybrid search 連續三輪都排在候選最前面但沒被選**,不代表使用者不想做,可以考慮下次直接主動問「要不要做 hybrid search 了」而不是每次都列一長串候選。
+使用者說這些方向都想做,已經照優先順序做完 `remove` → 「更聰明的 dedupe」+「清空知識庫指令」→ 「自動打標籤(殼)」→ 「RSS ingestion」→ 「Streamlit 網頁介面」→「一鍵啟動」→ 「feed 訂閱清單(CLI)」→ 「feed 訂閱清單補進網頁介面」→ 「search/ask 顯示時間 + remove-batch 批次刪除(CLI)」→ 「remove-batch 補進網頁介面」(第五輪)→ 「訂閱真實 RSS 來源」(第六輪)→ **「翻譯成繁體中文 + 時間戳記改 UTC+8」(第七輪,使用者直接提的需求)**。**下一個對話開始時,建議問使用者接下來要做哪個**,不要自己選,除非使用者又直接提了具體需求。**hybrid search 連續三輪都排在候選最前面但沒被選**,不代表使用者不想做,可以考慮下次直接主動問「要不要做 hybrid search 了」而不是每次都列一長串候選。
 
 候選(不代表優先順序):
 - **Hybrid search**:目前 `search`/`ask` 只有語意搜尋(向量相似度),對精確詞彙查詢(人名、專有名詞)通常不如關鍵字搜尋準。加關鍵字 + 語意並用,會直接讓所有既有筆記的搜尋品質提升,不像新 ingestion 來源那樣只影響新加的內容。
@@ -167,12 +185,12 @@ CLAUDE.md「未來規劃方向」列的:
 
 ## 交接檢查清單(接手時建議做的事)
 
-1. `git log --oneline` 確認目前在哪個 commit,`git status --short --branch` 確認有沒有沒 commit 的東西、有沒有 `ahead`/`behind` origin(這次交接時,**第六輪:`rss_loader.py` 的內容過短 fallback 修復,這批預期還沒 commit/push**;第五輪的網頁批次刪除已經 commit 進 `19f9994` 並 push 了,第四輪 `5669b07`,第二、三輪分別是 `302939b`/`e12d091`)。
+1. `git log --oneline` 確認目前在哪個 commit,`git status --short --branch` 確認有沒有沒 commit 的東西、有沒有 `ahead`/`behind` origin(這次交接時,**第七輪:翻譯功能 + UTC+8 時間顯示,這批預期還沒 commit/push**;第六輪的 HN dedupe 修復已經 commit 進 `5e8e74f` 並 push 了,第五輪 `19f9994`,第四輪 `5669b07`,第二、三輪分別是 `302939b`/`e12d091`)。
 2. **知識庫裡現在有真實資料**:第六輪幫使用者訂閱了三個真實 RSS 來源(The Verge、Hacker News、Simon Willison's Weblog),`data/second_brain.db`/`data/chroma/` 不是空的測試資料,手動測試/除錯時要小心別誤刪這些真實訂閱或文章(用 `remove-batch`/`clear` 之前務必先 `list`/`feeds list` 確認)。
-3. `./.venv/Scripts/python.exe -m pytest -q` 應該要 72 個全過、~5 秒內跑完
-4. 如果要手動測 `add`/`search`,第一次跑會下載 ~90MB 的 embedding 模型,需要網路;jieba 第一次執行也會在本機建 prefix dict 快取(不用連網,純本機運算,第一次會慢個零點幾秒)
-5. 如果要手動測 `ask`,需要使用者提供 `ANTHROPIC_API_KEY`(這台機器目前沒設,使用者已經知道怎麼設定,是自己的事,不用主動催)
+3. **這台機器沒有設 `ANTHROPIC_API_KEY`**:`ask`/`translate` 都還沒被使用者實際跑過,`second-brain translate` 目前只驗證過「沒 key 時清楚報錯退出」這條路徑,還沒驗證過真的翻譯品質。使用者設定 key 之後,建議提醒他跑一次 `second-brain translate` 幫現有 40 幾篇文章補翻譯,並抽查幾篇品質。
+4. `./.venv/Scripts/python.exe -m pytest -q` 應該要 83 個全過、~5 秒內跑完
+5. 如果要手動測 `add`/`search`,第一次跑會下載 ~90MB 的 embedding 模型,需要網路;jieba 第一次執行也會在本機建 prefix dict 快取(不用連網,純本機運算,第一次會慢個零點幾秒)
 6. `pyproject.toml` 這輪陸續加了 `jieba>=0.42`、`feedparser>=6.0`、`streamlit>=1.38`(在 `[project.optional-dependencies].ui`,不在預設 `dev` 裡)依賴,如果是全新環境要記得重新 `pip install -e ".[dev]"`(CLI/測試)跟 `pip install -e ".[ui]"`(網頁介面)
 7. 如果要手動測 `add-feed`/`feeds add` 又不想真的連網,`feedparser.parse()` 吃本機檔案路徑或原始 XML 字串都可以;這輪也已經用多個真實網址(BBC News、The Verge、Hacker News、Simon Willison's Weblog)驗證過連網路徑沒問題
 8. 開始功能表有一個「Second Brain」捷徑指向 [run_web.bat](run_web.bat)(這輪在使用者機器上建的,不在 git 裡,取代了原本刪掉的桌面捷徑);如果要驗證雙擊啟動的行為,記得先刪掉 `%USERPROFILE%\.streamlit\credentials.toml` 模擬全新機器,不然「歡迎訊息卡住」那個 bug 修好了沒有根本測不出來
-9. 如果要用瀏覽器自動化測 Streamlit 網頁介面,見「中途做的決策」裡記錄的多筆工具限制筆記(text_input 優先用 `computer` 的 triple_click+type,checkbox 要用 JS 點 `label` 元素,`expander` 沒設 `expanded=True` 會每次 rerun 自動收合)
+9. 如果要用瀏覽器自動化測 Streamlit 網頁介面,見「中途做的決策」裡記錄的多筆工具限制筆記(text_input 優先用 `computer` 的 triple_click+type,checkbox 要用 JS 點 `label` 元素,`expander` 沒設 `expanded=True` 會每次 rerun 自動收合,長時間執行的 process 會快取住舊模組、遇到剛加的名稱 `ImportError` 先重啟 process)

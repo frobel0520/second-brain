@@ -29,6 +29,10 @@ def list_documents() -> list[DocumentSummary]:
     return sqlite_store.list_documents()
 
 
+def get_document(document_id: str) -> Document | None:
+    return sqlite_store.get_document(document_id)
+
+
 def _delete_document(existing: Document) -> None:
     chunk_ids = sqlite_store.get_chunk_ids(existing.id)
     vector_store.delete_chunks(chunk_ids)
@@ -144,3 +148,11 @@ def unsubscribe_feed(url: str) -> FeedSubscription | None:
 
 def mark_feed_synced(url: str) -> None:
     sqlite_store.update_feed_last_synced(url, datetime.now(timezone.utc))
+
+
+def list_documents_missing_translation() -> list[Document]:
+    return sqlite_store.list_documents_missing_translation()
+
+
+def update_translated_content(document_id: str, translated_content: str) -> None:
+    sqlite_store.update_translated_content(document_id, translated_content)

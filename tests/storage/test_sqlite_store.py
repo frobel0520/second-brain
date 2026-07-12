@@ -123,6 +123,79 @@ def test_delete_all_documents_removes_everything(tmp_path: Path) -> None:
     assert sqlite_store.get_chunk_ids("doc-a", db_path=db_path) == []
 
 
+def test_ensure_translated_content_column_migrates_old_schema(tmp_path: Path) -> None:
+    """模擬「在 translated_content 欄位存在之前建立的資料庫」,確認 `_connect()`
+    會自動幫舊資料庫補上這個欄位,不需要使用者手動刪掉重建。"""
+    import sqlite3
+
+    db_path = tmp_path / "old.db"
+    conn = sqlite3.connect(db_path)
+    conn.executescript(
+        "CREATE TABLE documents (id TEXT PRIMARY KEY, source_path TEXT NOT NULL, title TEXT NOT NULL, "
+        "content TEXT NOT NULL, created_at TEXT NOT NULL, metadata TEXT NOT NULL, "
+        "tags TEXT NOT NULL DEFAULT '[]');"
+    )
+    conn.close()
+
+    document = Document(id="doc-1", source_path="/tmp/note.md", title="note", content="hello")
+    sqlite_store.insert_document(document, [], db_path=db_path)
+
+    fetched = sqlite_store.get_document("doc-1", db_path=db_path)
+    assert fetched.translated_content is None
+
+
+def test_insert_document_persists_translated_content(tmp_path: Path) -> None:
+    db_path = tmp_path / "test.db"
+    document = Document(
+        id="doc-1", source_path="/tmp/note.md", title="note", content="hello", translated_content="你好"
+    )
+
+    sqlite_store.insert_document(document, [], db_path=db_path)
+
+    fetched = sqlite_store.get_document("doc-1", db_path=db_path)
+    assert fetched.translated_content == "你好"
+
+
+def test_list_documents_reports_has_translation(tmp_path: Path) -> None:
+    db_path = tmp_path / "test.db"
+    translated = Document(
+        id="doc-a", source_path="/tmp/a.md", title="A", content="a", translated_content="甲"
+    )
+    untranslated = Document(id="doc-b", source_path="/tmp/b.md", title="B", content="b")
+    sqlite_store.insert_document(translated, [], db_path=db_path)
+    sqlite_store.insert_document(untranslated, [], db_path=db_path)
+
+    summaries = {s.id: s for s in sqlite_store.list_documents(db_path=db_path)}
+
+    assert summaries["doc-a"].has_translation is True
+    assert summaries["doc-b"].has_translation is False
+
+
+def test_list_documents_missing_translation_returns_only_untranslated(tmp_path: Path) -> None:
+    db_path = tmp_path / "test.db"
+    translated = Document(
+        id="doc-a", source_path="/tmp/a.md", title="A", content="a", translated_content="甲"
+    )
+    untranslated = Document(id="doc-b", source_path="/tmp/b.md", title="B", content="b")
+    sqlite_store.insert_document(translated, [], db_path=db_path)
+    sqlite_store.insert_document(untranslated, [], db_path=db_path)
+
+    pending = sqlite_store.list_documents_missing_translation(db_path=db_path)
+
+    assert [d.id for d in pending] == ["doc-b"]
+
+
+def test_update_translated_content(tmp_path: Path) -> None:
+    db_path = tmp_path / "test.db"
+    document = Document(id="doc-1", source_path="/tmp/note.md", title="note", content="hello")
+    sqlite_store.insert_document(document, [], db_path=db_path)
+
+    sqlite_store.update_translated_content("doc-1", "你好", db_path=db_path)
+
+    fetched = sqlite_store.get_document("doc-1", db_path=db_path)
+    assert fetched.translated_content == "你好"
+
+
 def test_insert_feed_subscription_round_trips(tmp_path: Path) -> None:
     db_path = tmp_path / "test.db"
     feed = FeedSubscription(id="feed-1", url="https://example.com/rss.xml", name="Example Feed")
