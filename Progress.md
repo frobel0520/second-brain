@@ -4,7 +4,7 @@
 使用方式看 [README.md](README.md),規劃看 [CLAUDE.md](CLAUDE.md)。這份只記錄
 「現在做到哪、為什麼這樣做、接下來大概要做什麼」,每次做完一個階段性任務就更新。
 
-最後更新:2026-07-12(第十三輪,`feeds sync` 排程自動化)
+最後更新:2026-07-12(第十四輪,整理待辦清單 + 排程細節問答)
 
 ## 現況一句話
 
@@ -14,13 +14,20 @@ CLAUDE.md 的 MVP 加上這些都做完了:`list`/`remove`/`clear`/`add-feed`/�
 (第七輪)/hybrid search(第九輪,已 commit 進 `f44d231`)/文件分類(第十輪,
 `科技`/`新聞`/`財經` 三個分類,`list`/`search`/`ask`/瀏覽頁面都能按分類篩選,
 已 commit 進 `f0ef6d6` 並 push)/**`feeds sync` 排程自動化**(第十三輪,
-Windows 排程工作每天早上 8 點自動跑一次,見下面專節)。**CLAUDE.md 原本把
-「自動化排程」明確排除在 MVP 範圍外,這次是使用者主動要求才做,不是我自己
-決定跨出範圍。**
+Windows 排程工作每天早上 8 點自動跑一次,已 commit 進 `f846938` 並 push,
+見下面專節)。**CLAUDE.md 原本把「自動化排程」明確排除在 MVP 範圍外,這次
+是使用者主動要求才做,不是我自己決定跨出範圍。**
 
-**第十三輪程式碼還沒 commit**,交接時記得先確認有沒有人接手 commit——
-`git status` 應該看得到 `second_brain/interface/cli.py` 改過、新增
-`tests/interface/test_cli.py`。
+**第十四輪沒有改程式碼**,做了兩件事:(1) 使用者問排程工作在「電腦當天
+是關機狀態」跟「會不會用到 API token」這兩個問題,細節見下面「`feeds
+sync` 排程自動化」專節新增的說明——重點是 `StartWhenAvailable=True` 會在
+下次登入時補跑、但工作本身是 `LogonType: Interactive`(綁在使用者登入,
+不是「電腦開機就跑」);目前沒設 `ANTHROPIC_API_KEY` 所以自動翻譯呼叫會
+靜默失敗、不花 token,但**如果之後設了 key,排程會開始自動幫每天新文章
+呼叫 Anthropic API 翻譯,是無感的背景行為**,要記得。(2) 使用者要求把
+「待辦清單」裡的兩項拿掉:**更多財經 RSS 來源**、**翻譯功能品質驗證**,
+其餘候選都保留,已經從「接下來可能的方向」跟「已知的粗糙邊界」/「交接
+檢查清單」裡對應的地方刪掉,不是還沒做完只是先不追蹤。
 
 **第十二輪:使用者決定把知識庫換成全部中文內容**——退訂 The Verge/Hacker
 News/Simon Willison's Weblog 這三個英文科技來源、**並刪除這三個來源已經拉
@@ -139,7 +146,9 @@ RSS,列出來讓使用者選,使用者選**全部訂閱**:**iThome**
   - `second_brain/interface/cli.py` 的 `feeds sync` 加了 `--log-file PATH` 選項。**只是彙總結果,不是逐來源的詳細 log**:新增 `_format_sync_log_line(results)` 把這次同步所有來源的 `added`/`updated` 加總、統計失敗來源數,格式化成一行(例如 `2026-07-13 08:00:00  新增 12 篇、更新 3 篇、失敗 0 個來源`,失敗的話後面接 `:來源名 同步失敗:原因`),用 `--log-file` 給的路徑以 append 模式寫進去。**沒給 `--log-file` 的話行為完全沒變**,這個選項是純粹加值,不影響既有用法。
   - **排程機制用 Windows 內建工作排程器(Task Scheduler),不是自己寫常駐程式或裝額外的排程套件**:透過 PowerShell 的 `Register-ScheduledTask` 建立一個叫 `SecondBrainFeedsSync` 的排程工作,每天早上 8:00 執行 `.venv\Scripts\python.exe -m second_brain feeds sync --log-file <專案路徑>\data\sync.log`,working directory 設成專案根目錄。**選 Task Scheduler 而不是寫一個 Python 常駐程式**:符合 local-first 原則(不額外引入新的常駐服務/依賴),而且 `config.py` 的 `PROJECT_ROOT` 是用 `Path(__file__).resolve().parent.parent` 算出來的,不依賴呼叫時的工作目錄,所以排程工作用絕對路徑呼叫 `python.exe` 就能正確找到 `data/second_brain.db`,不需要額外處理路徑問題。
   - **手動觸發驗證過一次真的能動**:用 `Start-ScheduledTask` 手動觸發,一開始檢查 `LastTaskResult` 時看到 `267009`(SCHED_S_TASK_RUNNING,還在跑,不是失敗),多等一下之後變成 `0`(成功),`data/sync.log` 也確實多了一行,不是只看排程有沒有建立就假設會動。**這個排程工作是機器層級的設定,不在 git 裡**,跟 Start Menu 捷徑、`.streamlit/credentials.toml` 一樣是機器特定的東西,換一台機器要重新建立(可以用同一段 `Register-ScheduledTask` PowerShell 指令)。
-  - **已知限制,故意先不處理**:`data/sync.log` 沒有輪替(rotation)機制,每天一行,累積個幾年也才幾千行,對個人用途的檔案大小不是問題,先不做自動清理/輪替。另外這個排程只會在**電腦有開機、使用者有登入**的情況下才會執行(`Register-ScheduledTask` 預設用目前登入的使用者身份、沒有設定「即使使用者未登入也執行」),如果電腦當天沒開機,那天就不會同步,不會有補跑機制——對個人筆電這種使用情境來說是合理的取捨,沒有特別處理「錯過的那天要不要補跑」。
+  - **已知限制,故意先不處理**:`data/sync.log` 沒有輪替(rotation)機制,每天一行,累積個幾年也才幾千行,對個人用途的檔案大小不是問題,先不做自動清理/輪替。
+  - **第十四輪:實際查證過「電腦當天沒開機」會怎樣,上一輪筆記原本猜錯,這輪訂正**:上一輪筆記原本寫「沒有補跑機制,電腦當天沒開機那天就不會同步」,是沒有實際查證就寫下去的猜測。這輪用 `Get-ScheduledTask` 查這個工作實際的 `Settings`/`Principal` 才發現:建立時用的 `New-ScheduledTaskSettingsSet -StartWhenAvailable` **確實有生效**(`StartWhenAvailable = True`),代表如果 8:00 電腦是關機狀態,排程器會在下一次符合條件時把錯過的這次補上。但 `Principal.LogonType` 是 `Interactive`(綁在 `ytwei` 這個使用者的登入身份,不是「電腦開機就跑」、也不是不管有沒有人登入都跑的系統層級工作),所以精確的行為是:**電腦開機、使用者登入之後,排程器會偵測到今天這次還沒跑、很快補跑一次**,不是完全不會補、但也不是「開機瞬間」就觸發,是要等到實際登入那個時間點。**教訓**:排程/系統設定這類「聲稱會怎麼運作」的細節,尤其牽涉到「missed run 會不會補」這種容易讓人日常誤解的行為,要直接查詢實際設定值(`Get-ScheduledTask`/`Get-ScheduledTaskInfo`)才寫進筆記,不要靠對 Windows Task Scheduler 一般印象去猜,猜錯了下一個人接手會被誤導。
+  - **第十四輪:確認過排程本身不花 API token,但如果之後設定 `ANTHROPIC_API_KEY` 會改變**:`feeds sync` 每篇文章的 embedding(sentence-transformers)、自動打標籤(jieba)都是本機運算,不叫任何 API,永遠不花 token。但 `ingest_document()` 內建的自動翻譯(`processing/translation.py:AnthropicTranslationProvider`)每篇新/更新的文章都會嘗試呼叫一次 Anthropic API——**這台機器目前沒設 `ANTHROPIC_API_KEY`,所以這個呼叫現在會失敗且被 `_translate_best_effort()` 靜默吞掉,完全不花 token**。但**如果使用者之後真的設定了 `ANTHROPIC_API_KEY`**(例如只是想手動用 `ask` 問答),這個每天自動跑的排程會**自動、無感地**開始幫每天新抓進來的文章呼叫 API 翻譯,9 個訂閱來源、一天可能新增幾十篇,長期下來是會產生實際費用的——這不是這輪要處理的問題,只是先記下來,等使用者真的設定 key 的時候要主動提醒這個關聯,不要假設他自己會想到「設 key 給 ask 用」會連帶讓排程開始花錢做翻譯。
 
 **RSS/Atom ingestion**(CLAUDE.md「更多 ingestion 來源」的第一個):`ingestion/rss_loader.py` 的 `load_feed(feed_url, limit=None) -> list[Document]`,用 `feedparser` 解析 feed,每個 entry 轉成一個 `Document`:
   - `source_path` 用文章的 `link`(dedupe/`remove` 都靠這個欄位比對,語意上等同本機檔案的路徑)
@@ -232,7 +241,6 @@ RSS,列出來讓使用者選,使用者選**全部訂閱**:**iThome**
 - **第五輪:網頁介面批次刪除的「預覽符合的文件」結果存在 `st.session_state`,切換分頁或做其他操作不會自動清掉**,如果使用者預覽完之後跑去別的分頁刪了某篇筆記、又切回來直接勾確認刪除,實際刪除時是照「當初預覽的那份清單」執行(`remove_documents()` 用的是預覽當下記下的 id 列表),已經被刪掉的 id 會被 `remove_documents()` 靜默略過(`sqlite_store.get_document(id)` 找不到就跳過,不會報錯),不會導致誤刪別的東西,但如果知識庫在預覽之後有新增符合條件的文件,不會自動出現在待刪清單裡,要重新按一次「預覽符合的文件」才會抓到最新結果。
 - **第四輪:`remove-batch` 的 `--after`/`--before` 只支援 `YYYY-MM-DD` 絕對日期,沒有「N 天前」這種相對日期的簡寫**,要刪「30 天前的文章」得自己算出日期字串。之後如果常用可以加 `--older-than-days N` 這種語法糖,MVP 先不做。
 - **第四輪:`remove-batch --keyword` 對這次修正之前就存在的舊資料,標籤比對不到中文**(`tags` 欄位還是舊的 `ensure_ascii=True` 跳脫格式),標題/內容欄位不受影響。見上面「決策」段落的詳細說明,要嘛重新 `add`/`feeds sync`,要嘛之後寫一次性 migration script。
-- **第七輪:翻譯功能還沒有實際跑過真的翻譯,只驗證過「沒 key 時的優雅降級」路徑**:這台機器沒有設 `ANTHROPIC_API_KEY`,`second-brain translate`/自動翻譯都還沒真的呼叫過 Anthropic API 拿到過翻譯結果——已驗證的是「沒 key 時 `add` 照常運作、`translate` 清楚報錯退出」這條路徑,**還沒驗證過的是**:真的翻譯出來的繁體中文品質好不好、`TRANSLATION_SYSTEM_PROMPT` 的指示夠不夠清楚、長文章會不會被 `max_tokens=4096` 截斷。使用者設定 key 之後第一次跑 `translate` 或 `add`,建議抽查幾篇的 `translated_content` 品質,不要假設一定沒問題。
 - **第七輪:`translate` 指令/自動翻譯沒有記錄「翻譯失敗的原因」**,只有 `translate` 指令當下印出來的訊息,沒有存進資料庫或 log,失敗的文件下次執行 `translate` 只是「再試一次」,不會知道上次為什麼失敗(除非剛好還記得當時的輸出)。
 - **第七輪:網頁介面的「查看繁體中文翻譯」展開區塊,每次頁面渲染都會對每一篇有翻譯的文件多查一次資料庫**(`get_document(document.id)` 在迴圈裡呼叫,不管使用者有沒有真的展開那個 expander)。對個人用途的文件量(幾十到幾百篇)效能上不是問題,文件量大幅成長的話可以考慮改成真的懶載入(例如用 `st.session_state` 快取或按需查詢)。
 - **第七輪:翻譯的內容長度沒有特別處理**,`max_tokens=4096` 對一般新聞文章長度應該夠,但沒有測過特別長的文章(例如 Ars Technica 的深度報導)會不會被截斷。
@@ -264,14 +272,13 @@ Hybrid search(關鍵字 + 語意搜尋並用)**第九輪已經做完**,文件分
 - 網頁介面的細節打磨(新增後自動跳轉、分頁、更明確的操作回饋)——使用者已經開始實際用網頁介面,這些會變得比較有感。
 - **舊資料的 `tags` 欄位 migration**:把這次修正之前存進去的 ASCII 跳脫格式標籤轉成 `ensure_ascii=False` 格式,讓 `remove-batch --keyword` 對舊文件的標籤比對也能生效。不急,先重新 `add`/`feeds sync` 一次也能解決,只是比較手動。
 - **分類下拉選單/自動建議**:見上面「已知的粗糙邊界」,網頁介面批次設定分類的地方目前是純文字輸入,容易手滑打錯字;可以考慮換成下拉選單 + 新增選項的組合。
-- **更多財經 RSS 來源**:這輪只挑了 3 個(經濟日報/自由時報財經版/Yahoo股市),討論候選時還看過商周財富網(`https://www.businessweekly.com.tw/feedsec.aspx?feedid=10&channelid=15`,已驗證可用但使用者這輪沒選),之後如果想再加可以直接用。
 
 ## 交接檢查清單(接手時建議做的事)
 
 1. `git log --oneline` 確認目前在哪個 commit,`git status --short --branch` 確認有沒有沒 commit 的東西、有沒有 `ahead`/`behind` origin。**這次交接時,第十三輪(`feeds sync` 排程自動化)的程式碼還沒 commit**(第十輪/第九輪已經 commit 進 `f0ef6d6`/`f44d231` 並 push)——`git status` 應該看得到 `second_brain/interface/cli.py` 改過、`tests/interface/test_cli.py` 是新檔案。第十一輪、第十二輪都沒有改任何程式碼(只有訂閱來源異動,資料本身在 `data/` 底下、`.gitignore` 掉了,不會進 git)。`.claude/launch.json` 有改過(加 `autoPort: true`),但這個檔案本來就在 `.gitignore` 裡,不會出現在 `git status`,不用理它。
 2. **這台機器上有一個 Windows 排程工作 `SecondBrainFeedsSync`(第十三輪建的),每天早上 8:00 自動跑 `second-brain feeds sync --log-file data/sync.log`**——這是機器層級設定,不在 git 裡,換一台機器要重新用 `Register-ScheduledTask` 建立(指令見上面「`feeds sync` 排程自動化」決策說明)。想查排程有沒有正常執行,看 `data/sync.log`(每次同步一行,格式:時間戳 + 新增/更新總篇數 + 失敗來源數)或用 `Get-ScheduledTask -TaskName SecondBrainFeedsSync | Get-ScheduledTaskInfo` 查 `LastTaskResult`(0 是成功)。
 3. **知識庫裡現在有真實資料,訂閱來源這輪(第十二輪)大換血過**:科技類是 iThome、TechNews 科技新報、DIGITIMES(第十一輪訂的,原本的 The Verge/Hacker News/Simon Willison's Weblog 這三個英文來源已經在第十二輪退訂並刪除所有文章);財經類是經濟日報、自由時報財經版、Yahoo股市(第十輪);新聞類是中央社(國際)、BBC中文網、ETtoday(第十二輪)。`feeds list` 應該看到這 9 個訂閱、`list` 應該看到 100 多篇文件(排程每天都會跑,篇數會持續變動),全部都已經分類完畢(科技/財經/新聞三類,沒有未分類的)。手動測試/除錯時要小心別誤刪這些真實訂閱或文章(用 `remove-batch`/`clear`/`set-category` 之前務必先 `list`/`feeds list` 確認)。
-4. **這台機器沒有設 `ANTHROPIC_API_KEY`**:`ask`/`translate` 都還沒被使用者實際跑過,`second-brain translate` 目前只驗證過「沒 key 時清楚報錯退出」這條路徑,還沒驗證過真的翻譯品質。使用者設定 key 之後,建議提醒他跑一次 `second-brain translate` 幫現有文章補翻譯,並抽查幾篇品質。
+4. **這台機器沒有設 `ANTHROPIC_API_KEY`**:`ask`/`translate` 都還沒被使用者實際跑過,`second-brain translate` 目前只驗證過「沒 key 時清楚報錯退出」這條路徑。**翻譯品質不在待辦清單裡追蹤了(使用者第十四輪要求拿掉)**,如果之後真的設了 key、剛好有人想確認翻譯品質,再另外評估,不用主動提醒。
 5. `./.venv/Scripts/python.exe -m pytest -q` 應該要 109 個全過(第十三輪加了 3 個新測試,106 → 109)、~6 秒內跑完
 6. 如果要手動測 `add`/`search`,第一次跑會下載 ~90MB 的 embedding 模型,需要網路;jieba 第一次執行也會在本機建 prefix dict 快取(不用連網,純本機運算,第一次會慢個零點幾秒)
 7. `pyproject.toml` 這輪陸續加了 `jieba>=0.42`、`feedparser>=6.0`、`streamlit>=1.38`(在 `[project.optional-dependencies].ui`,不在預設 `dev` 裡)、`rank_bm25>=0.2`(第九輪,在預設 `dependencies` 裡,不是 optional),**第十三輪沒有再加新依賴**(排程用 Windows 內建的 Task Scheduler,不需要額外套件),如果是全新環境要記得重新 `pip install -e ".[dev]"`(CLI/測試)跟 `pip install -e ".[ui]"`(網頁介面)
