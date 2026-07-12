@@ -26,7 +26,7 @@ Windows 排程工作每天早上 8 點自動跑一次,已 commit 進 `f846938` �
 `st.tabs()` 沒辦法用程式碼切換分頁,細節見下面「網頁介面細節打磨」專節。
 **三項都用 Claude Browser pane 實際操作過網頁介面驗證,包含手動訂閱一個
 故意失效的網址來驗證失敗折疊區塊真的正確顯示,不是只看程式碼合理就結案**,
-驗證完有把測試用的失效訂閱清乾淨。**第十五輪的程式碼還沒 commit**。
+驗證完有把測試用的失效訂閱清乾淨。**第十五輪的程式碼已經 commit 進 `e8e1959` 並 push。**
 
 **第十四輪沒有改程式碼**,做了兩件事:(1) 使用者問排程工作在「電腦當天
 是關機狀態」跟「會不會用到 API token」這兩個問題,細節見下面「`feeds
@@ -292,7 +292,7 @@ Hybrid search(關鍵字 + 語意搜尋並用)**第九輪已經做完**,文件分
 
 ## 交接檢查清單(接手時建議做的事)
 
-1. `git log --oneline` 確認目前在哪個 commit,`git status --short --branch` 確認有沒有沒 commit 的東西、有沒有 `ahead`/`behind` origin。**這次交接時,第十五輪(網頁介面細節打磨)的程式碼還沒 commit**(第十三輪/第十輪/第九輪已經分別 commit 進 `f846938`/`f0ef6d6`/`f44d231` 並 push)——`git status` 應該看得到 `second_brain/interface/web.py` 改過,沒有新檔案。第十一輪、第十二輪、第十四輪都沒有改任何程式碼。`.claude/launch.json` 有改過(加 `autoPort: true`),但這個檔案本來就在 `.gitignore` 裡,不會出現在 `git status`,不用理它。
+1. `git log --oneline` 確認目前在哪個 commit,`git status --short --branch` 確認有沒有沒 commit 的東西、有沒有 `ahead`/`behind` origin。**這次交接時,第十五輪(網頁介面細節打磨)已經 commit 進 `e8e1959` 並 push**(第十三輪/第十輪/第九輪也分別 commit 進 `f846938`/`f0ef6d6`/`f44d231`)——工作目錄應該是乾淨的,`git status --short --branch` 應該只顯示 `## master...origin/master`,沒有多餘的修改。第十一輪、第十二輪、第十四輪都沒有改任何程式碼。`.claude/launch.json` 有改過(加 `autoPort: true`),但這個檔案本來就在 `.gitignore` 裡,不會出現在 `git status`,不用理它。
 2. **這台機器上有一個 Windows 排程工作 `SecondBrainFeedsSync`(第十三輪建的),每天早上 8:00 自動跑 `second-brain feeds sync --log-file data/sync.log`**——這是機器層級設定,不在 git 裡,換一台機器要重新用 `Register-ScheduledTask` 建立(指令見上面「`feeds sync` 排程自動化」決策說明)。想查排程有沒有正常執行,看 `data/sync.log`(每次同步一行,格式:時間戳 + 新增/更新總篇數 + 失敗來源數)或用 `Get-ScheduledTask -TaskName SecondBrainFeedsSync | Get-ScheduledTaskInfo` 查 `LastTaskResult`(0 是成功)。
 3. **知識庫裡現在有真實資料,訂閱來源這輪(第十二輪)大換血過**:科技類是 iThome、TechNews 科技新報、DIGITIMES(第十一輪訂的,原本的 The Verge/Hacker News/Simon Willison's Weblog 這三個英文來源已經在第十二輪退訂並刪除所有文章);財經類是經濟日報、自由時報財經版、Yahoo股市(第十輪);新聞類是中央社(國際)、BBC中文網、ETtoday(第十二輪)。`feeds list` 應該看到這 9 個訂閱、`list` 應該看到 100 多篇文件(排程每天都會跑,篇數會持續變動),全部都已經分類完畢(科技/財經/新聞三類,沒有未分類的)。手動測試/除錯時要小心別誤刪這些真實訂閱或文章(用 `remove-batch`/`clear`/`set-category` 之前務必先 `list`/`feeds list` 確認)。
 4. **這台機器沒有設 `ANTHROPIC_API_KEY`**:`ask`/`translate` 都還沒被使用者實際跑過,`second-brain translate` 目前只驗證過「沒 key 時清楚報錯退出」這條路徑。**翻譯品質不在待辦清單裡追蹤了(使用者第十四輪要求拿掉)**,如果之後真的設了 key、剛好有人想確認翻譯品質,再另外評估,不用主動提醒。
