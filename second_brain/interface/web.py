@@ -13,6 +13,7 @@ from pathlib import Path
 import anthropic
 import streamlit as st
 
+from second_brain.config import DISPLAY_TIMEZONE
 from second_brain.ingestion.loader import load_document
 from second_brain.ingestion.pipeline import ingest_document, sync_all_feed_subscriptions, sync_feed_subscription
 from second_brain.ingestion.rss_loader import get_feed_title, load_feed
@@ -22,6 +23,7 @@ from second_brain.retrieval.ask import ask as run_ask
 from second_brain.retrieval.search import search as run_search
 from second_brain.storage import (
     find_documents,
+    get_document,
     list_documents,
     list_feed_subscriptions,
     remove_document,
@@ -64,11 +66,16 @@ with tab_browse:
                     st.markdown(
                         f"**{document.title}**"
                         f"  ·  {document.chunk_count} 個片段"
-                        f"  ·  {document.created_at:%Y-%m-%d %H:%M}"
+                        f"  ·  {document.created_at.astimezone(DISPLAY_TIMEZONE):%Y-%m-%d %H:%M}"
                     )
                     if document.tags:
                         st.caption("🏷️ " + "、".join(document.tags))
                     st.caption(document.source_path)
+                    if document.has_translation:
+                        with st.expander("🇹🇼 查看繁體中文翻譯"):
+                            full_document = get_document(document.id)
+                            if full_document is not None and full_document.translated_content:
+                                st.write(full_document.translated_content)
                 with col_action:
                     if st.button("刪除", key=f"remove-{document.id}"):
                         remove_document(document.source_path)
@@ -118,7 +125,8 @@ with tab_browse:
     if batch_matches:
         st.write(f"符合條件的文件共 {len(batch_matches)} 筆:")
         for match in batch_matches:
-            st.write(f"- {match.created_at:%Y-%m-%d %H:%M}  {match.title}  ({match.source_path})")
+            created = match.created_at.astimezone(DISPLAY_TIMEZONE)
+            st.write(f"- {created:%Y-%m-%d %H:%M}  {match.title}  ({match.source_path})")
 
         confirmed = st.checkbox(
             f"我確認要刪除這 {len(batch_matches)} 筆文件,這個動作無法復原。", key="batch-confirm"
@@ -142,7 +150,7 @@ with tab_search:
         else:
             for rank, result in enumerate(results, start=1):
                 with st.container(border=True):
-                    created = result.document.created_at.strftime("%Y-%m-%d %H:%M")
+                    created = result.document.created_at.astimezone(DISPLAY_TIMEZONE).strftime("%Y-%m-%d %H:%M")
                     st.markdown(f"**[{rank}] {result.document.title}**  (score={result.score:.3f}, {created})")
                     st.caption(result.document.source_path)
                     st.write(result.chunk.content)
@@ -164,7 +172,8 @@ with tab_ask:
                 st.caption(
                     "來源:"
                     + "、".join(
-                        f"{source.document.title}({source.document.created_at:%Y-%m-%d %H:%M})"
+                        f"{source.document.title}"
+                        f"({source.document.created_at.astimezone(DISPLAY_TIMEZONE):%Y-%m-%d %H:%M})"
                         for source in ask_result.sources
                     )
                 )
@@ -240,7 +249,7 @@ with tab_feeds:
                 col_info, col_sync, col_remove = st.columns([5, 1, 1])
                 with col_info:
                     last_synced = (
-                        feed.last_synced_at.strftime("%Y-%m-%d %H:%M")
+                        feed.last_synced_at.astimezone(DISPLAY_TIMEZONE).strftime("%Y-%m-%d %H:%M")
                         if feed.last_synced_at
                         else "尚未同步"
                     )

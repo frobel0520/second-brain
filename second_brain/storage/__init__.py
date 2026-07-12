@@ -1,7 +1,9 @@
 from second_brain.storage.store import (
     clear_all,
     find_documents,
+    get_document,
     list_documents,
+    list_documents_missing_translation,
     list_feed_subscriptions,
     mark_feed_synced,
     remove_document,
@@ -11,12 +13,15 @@ from second_brain.storage.store import (
     search_similar,
     subscribe_feed,
     unsubscribe_feed,
+    update_translated_content,
 )
 
 __all__ = [
     "clear_all",
     "find_documents",
+    "get_document",
     "list_documents",
+    "list_documents_missing_translation",
     "list_feed_subscriptions",
     "mark_feed_synced",
     "remove_document",
@@ -26,4 +31,5 @@ __all__ = [
     "search_similar",
     "subscribe_feed",
     "unsubscribe_feed",
+    "update_translated_content",
 ]

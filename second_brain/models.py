@@ -15,6 +15,7 @@ class Document:
     created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     metadata: dict = field(default_factory=dict)
     tags: list[str] = field(default_factory=list)
+    translated_content: str | None = None
 
 
 @dataclass
@@ -42,6 +43,7 @@ class DocumentSummary:
     created_at: datetime
     chunk_count: int
     tags: list[str] = field(default_factory=list)
+    has_translation: bool = False
 
 
 @dataclass
