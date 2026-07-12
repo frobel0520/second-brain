@@ -59,10 +59,10 @@ second_brain/
 ├── storage/          # SQLite + ChromaDB 讀寫封裝
 │   ├── sqlite_store.py   # metadata / 原文 (SQLite)
 │   ├── vector_store.py   # embedding (ChromaDB, persistent, 本機檔案)
-│   └── store.py          # 對外唯一介面: save_document(), search_similar(), list_documents(), replace_existing_document(), remove_document(), clear_all(), subscribe_feed(), unsubscribe_feed(), list_feed_subscriptions(), mark_feed_synced()
+│   └── store.py          # 對外唯一介面: save_document(), search_similar(), list_documents(), replace_existing_document(), remove_document(), remove_documents(), find_documents(), clear_all(), subscribe_feed(), unsubscribe_feed(), list_feed_subscriptions(), mark_feed_synced()
 ├── retrieval/         # 語意搜尋、RAG 問答
-│   ├── search.py         # search(): query 轉 embedding → search_similar()
-│   └── ask.py            # ask(): search() 結果組 context → 呼叫 Anthropic API 做問答
+│   ├── search.py         # search(): query 轉 embedding → search_similar(),回傳的 SearchResult 帶 document.created_at
+│   └── ask.py            # ask(): search() 結果組 context → 呼叫 Anthropic API 做問答,回傳 AskResult(answer, sources)
 └── interface/
     ├── cli.py            # typer CLI app
     └── web.py            # Streamlit 本機網頁介面
@@ -76,6 +76,8 @@ second_brain/
 - `TaggingProvider` 也是抽象介面,之後要換成 LLM 或規則式分類只需新增一個實作;`add` 時會自動呼叫,把標籤存進 `Document.tags`
 - `add` 跟 `add-feed` 共用同一套「標籤 → 切塊 → embedding → 存檔」邏輯(`ingestion/pipeline.py:ingest_document()`),加新的 ingestion 來源或新的 interface(CLI、網頁)只要能產生 `Document`,就自動有標籤/dedupe/embedding,不用重寫這段
 - **feed 訂閱清單**(`feeds` 指令組)跟一次性的 `add-feed` 是分開的功能:`add-feed` 抓一次就忘記,`feeds add` 會把來源記進 SQLite 的 `feeds` 表,之後可以用 `feeds sync` 一次同步所有訂閱來源。同步邏輯(`ingestion/pipeline.py:sync_feed_subscription()`)內部還是呼叫 `load_feed()` + `ingest_document()`,不重寫抓取/dedupe 邏輯;CLI 的 `feeds add` 跟網頁介面的「訂閱管理」分頁都呼叫同一個 `sync_feed_subscription()` 做第一次同步,不各自兜一份
+- **`remove-batch` 的日期/關鍵字/來源三個條件是 OR,不是 AND**:`storage/sqlite_store.py:find_documents()` 把有給的條件各自組成一段 SQL 子句,再用 `OR` 串起來;`--after`/`--before` 兩個一起給是例外,彼此是 `AND`(定義一段日期區間),這段區間本身再跟其他條件用 `OR`。跟 `clear` 一樣,刪除前會列出符合項目並要求確認(`--yes` 可跳過)
+- **`documents.tags`/`metadata` 這兩個 JSON 欄位存的時候要用 `json.dumps(..., ensure_ascii=False)`**,不能用預設值:預設 `ensure_ascii=True` 會把中文字轉成 `\uXXXX` 跳脫序列存進 SQLite,`find_documents()` 用 `LIKE` 對 `tags` 欄位做關鍵字比對時完全比對不到中文標籤。這個修正只影響「之後新寫入」的資料;**這次修正之前就已經存在的舊資料,`tags` 欄位仍是 ASCII 跳脫格式**,要重新 `add`/`feeds sync` 過一次才會用新格式存,`remove-batch --keyword` 在那之前對舊資料的標籤比對不到(標題/內容欄位本來就是純文字,不受影響)
 - `interface/` 底下的 `cli.py` 跟 `web.py` 是同一組核心邏輯的兩種操作介面,兩者都不直接碰 SQLite/ChromaDB,一律透過 `storage`/`retrieval`/`ingestion.pipeline` 的介面
 
 資料預設存在 `data/`(已 gitignore):
@@ -92,10 +94,11 @@ second_brain/
 | `second-brain feeds list` | ✅ 已實作 | 列出訂閱清單(名稱、網址、上次同步時間) |
 | `second-brain feeds remove <feed_url>` | ✅ 已實作 | 從訂閱清單移除來源,不會刪除已經加入知識庫的文章 |
 | `second-brain feeds sync [--limit/-n N]` | ✅ 已實作 | 同步訂閱清單裡的所有來源,抓新文章、更新舊文章,一個來源失敗不會擋住其他來源 |
-| `second-brain search "<query>" [--top-k K]` | ✅ 已實作 | 把 query 轉成向量,語意搜尋,回傳最相關的片段(含來源、分數) |
-| `second-brain ask "<query>" [--top-k K]` | ✅ 已實作 | 在 search 結果基礎上用 Anthropic API(`claude-opus-4-8`)做 RAG 問答,需要 `ANTHROPIC_API_KEY` |
+| `second-brain search "<query>" [--top-k K]` | ✅ 已實作 | 把 query 轉成向量,語意搜尋,回傳最相關的片段(含來源、分數、加入時間) |
+| `second-brain ask "<query>" [--top-k K]` | ✅ 已實作 | 在 search 結果基礎上用 Anthropic API(`claude-opus-4-8`)做 RAG 問答,答案下面附來源標題與時間,需要 `ANTHROPIC_API_KEY` |
 | `second-brain list` | ✅ 已實作 | 列出知識庫裡目前有哪些文件(標題、片段數、來源路徑、標籤) |
 | `second-brain remove <source>` | ✅ 已實作 | 從知識庫移除指定來源的紀錄(sqlite + chroma),不動硬碟上的檔案本身;本機檔案路徑或 RSS 文章網址都可以,檔案不用還存在 |
+| `second-brain remove-batch [--after DATE] [--before DATE] [--keyword K] [--source S] [--yes/-y]` | ✅ 已實作 | 依日期範圍/關鍵字/來源批次刪除文件,三種條件符合任一個就刪(OR);至少要給一個條件;刪除前列出符合項目並要求確認 |
 | `second-brain clear [--yes/-y]` | ✅ 已實作 | 清空整個知識庫(sqlite + chroma);預設會互動確認,`--yes` 跳過確認 |
 
 ## 開發

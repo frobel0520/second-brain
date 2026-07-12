@@ -80,7 +80,8 @@ with tab_search:
         else:
             for rank, result in enumerate(results, start=1):
                 with st.container(border=True):
-                    st.markdown(f"**[{rank}] {result.document.title}**  (score={result.score:.3f})")
+                    created = result.document.created_at.strftime("%Y-%m-%d %H:%M")
+                    st.markdown(f"**[{rank}] {result.document.title}**  (score={result.score:.3f}, {created})")
                     st.caption(result.document.source_path)
                     st.write(result.chunk.content)
 
@@ -90,13 +91,21 @@ with tab_ask:
 
     if question:
         try:
-            answer = run_ask(question, top_k=ask_top_k)
+            ask_result = run_ask(question, top_k=ask_top_k)
         except (anthropic.AuthenticationError, TypeError) as error:
             if isinstance(error, TypeError) and "authentication" not in str(error).lower():
                 raise
             st.error("找不到有效的 Anthropic API key,請設定環境變數 ANTHROPIC_API_KEY 後再試一次。")
         else:
-            st.write(answer)
+            st.write(ask_result.answer)
+            if ask_result.sources:
+                st.caption(
+                    "來源:"
+                    + "、".join(
+                        f"{source.document.title}({source.document.created_at:%Y-%m-%d %H:%M})"
+                        for source in ask_result.sources
+                    )
+                )
 
 with tab_add:
     st.subheader("上傳檔案")

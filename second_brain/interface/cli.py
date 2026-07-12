@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sys
+from datetime import datetime, time, timezone
 from pathlib import Path
 
 import anthropic
@@ -22,9 +23,11 @@ from second_brain.retrieval.ask import ask as run_ask
 from second_brain.retrieval.search import search as run_search
 from second_brain.storage import (
     clear_all,
+    find_documents,
     list_documents,
     list_feed_subscriptions,
     remove_document,
+    remove_documents,
     subscribe_feed,
     unsubscribe_feed,
 )
@@ -41,7 +44,7 @@ app.add_typer(feeds_app, name="feeds")
 
 @app.callback()
 def callback() -> None:
-    """add / add-feed / search / ask / list / remove / clear / feeds 幾組指令,強制保留子指令的形式。"""
+    """add / add-feed / search / ask / list / remove / remove-batch / clear / feeds 幾組指令,強制保留子指令的形式。"""
 
 
 def _format_ingest_result(result: IngestResult, location: str) -> str:
@@ -223,7 +226,8 @@ def search(
         if len(snippet) > 200:
             snippet = snippet[:200] + "…"
 
-        typer.echo(f"\n[{rank}] {result.document.title}  (score={result.score:.3f})")
+        created = result.document.created_at.strftime("%Y-%m-%d %H:%M")
+        typer.echo(f"\n[{rank}] {result.document.title}  (score={result.score:.3f}, {created})")
         typer.echo(f"    來源: {result.document.source_path}")
         typer.echo(f"    {snippet}")
 
@@ -235,14 +239,20 @@ def ask(
 ) -> None:
     """在 search 結果基礎上,呼叫 Anthropic API 做問答總結(RAG)。"""
     try:
-        answer = run_ask(query, top_k=top_k)
+        result = run_ask(query, top_k=top_k)
     except (anthropic.AuthenticationError, TypeError) as error:
         if isinstance(error, TypeError) and "authentication" not in str(error).lower():
             raise
         typer.echo("找不到有效的 Anthropic API key,請設定環境變數 ANTHROPIC_API_KEY 後再試一次。")
         raise typer.Exit(code=1)
 
-    typer.echo(answer)
+    typer.echo(result.answer)
+
+    if result.sources:
+        typer.echo("\n來源:")
+        for source in result.sources:
+            created = source.document.created_at.strftime("%Y-%m-%d %H:%M")
+            typer.echo(f"  - {source.document.title}  ({created})")
 
 
 @app.command(name="list")
@@ -282,6 +292,61 @@ def remove(
         raise typer.Exit(code=1)
 
     typer.echo(f"已從知識庫移除「{removed_title}」({source})")
+
+
+def _parse_filter_date(value: str, *, end_of_day: bool) -> datetime:
+    try:
+        parsed = datetime.strptime(value, "%Y-%m-%d")
+    except ValueError as error:
+        raise typer.BadParameter(f"日期格式錯誤,請用 YYYY-MM-DD:{value}") from error
+    if end_of_day:
+        parsed = datetime.combine(parsed.date(), time(23, 59, 59, 999999))
+    return parsed.replace(tzinfo=timezone.utc)
+
+
+@app.command(name="remove-batch")
+def remove_batch(
+    after: str | None = typer.Option(None, "--after", help="只找這個日期(含)之後加入的文件,格式 YYYY-MM-DD"),
+    before: str | None = typer.Option(None, "--before", help="只找這個日期(含)之前加入的文件,格式 YYYY-MM-DD"),
+    keyword: str | None = typer.Option(None, "--keyword", "-k", help="標題/內容/標籤符合這個關鍵字的文件"),
+    source: str | None = typer.Option(None, "--source", help="來源路徑或網址包含這段文字的文件"),
+    yes: bool = typer.Option(False, "--yes", "-y", help="跳過確認,直接刪除"),
+) -> None:
+    """依日期範圍、關鍵字、來源批次刪除文件。
+
+    三個條件是「符合任一個就刪」(OR),不是同時符合(AND);--after/--before
+    兩個一起給的話,這兩個之間是 AND,定義出一段日期區間,這段區間再跟關鍵字/
+    來源用 OR 組合。至少要給一個條件,不然請用 `second-brain clear` 清空整個
+    知識庫。刪除前會先列出符合的文件並要求確認,跟 `clear` 同樣的安全機制。
+    """
+    if not any([after, before, keyword, source]):
+        typer.echo(
+            "至少要給一個篩選條件(--after/--before/--keyword/--source)。"
+            "如果是想清空整個知識庫,請用 `second-brain clear`。"
+        )
+        raise typer.Exit(code=1)
+
+    after_dt = _parse_filter_date(after, end_of_day=False) if after else None
+    before_dt = _parse_filter_date(before, end_of_day=True) if before else None
+
+    matches = find_documents(created_after=after_dt, created_before=before_dt, keyword=keyword, source=source)
+
+    if not matches:
+        typer.echo("沒有符合條件的文件。")
+        raise typer.Exit(code=0)
+
+    typer.echo(f"符合條件的文件共 {len(matches)} 筆:")
+    for document in matches:
+        typer.echo(f"  {document.created_at:%Y-%m-%d %H:%M}  {document.title}  ({document.source_path})")
+
+    if not yes:
+        confirmed = typer.confirm(f"確定要刪除這 {len(matches)} 筆文件嗎?這個動作無法復原。")
+        if not confirmed:
+            typer.echo("已取消。")
+            raise typer.Exit(code=0)
+
+    removed_titles = remove_documents([document.id for document in matches])
+    typer.echo(f"已刪除 {len(removed_titles)} 筆文件。")
 
 
 @app.command()
