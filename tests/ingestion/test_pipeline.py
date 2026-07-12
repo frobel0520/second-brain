@@ -113,6 +113,28 @@ def test_sync_feed_subscription_ingests_all_entries() -> None:
     assert len(list_documents()) == 2
 
 
+def test_ingest_document_stamps_given_category() -> None:
+    result = ingest_document(_document("/tmp/note.md", "筆記", "database index"), category="科技")
+
+    assert result.document.category == "科技"
+
+
+def test_ingest_document_defaults_to_no_category() -> None:
+    result = ingest_document(_document("/tmp/note.md", "筆記", "database index"))
+
+    assert result.document.category is None
+
+
+def test_sync_feed_subscription_stamps_feed_category_on_every_document() -> None:
+    feed = FeedSubscription(id="feed-1", url=_RSS_FEED, name="Test Feed", category="財經")
+
+    sync_feed_subscription(feed)
+
+    documents = list_documents()
+    assert len(documents) == 2
+    assert all(document.category == "財經" for document in documents)
+
+
 def test_sync_feed_subscription_updates_last_synced_at() -> None:
     subscribe_feed(_RSS_FEED, "Test Feed")
     feed = sqlite_store.get_feed_subscription_by_url(_RSS_FEED)

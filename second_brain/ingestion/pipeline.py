@@ -47,8 +47,15 @@ def _translate_best_effort(document: Document) -> str | None:
         return None
 
 
-def ingest_document(document: Document) -> IngestResult | None:
-    """標籤 → 切塊 → embedding → 翻譯 → dedupe → 存檔。內容是空的就回傳 None,讓呼叫端決定怎麼處理。"""
+def ingest_document(document: Document, category: str | None = None) -> IngestResult | None:
+    """標籤 → 切塊 → embedding → 翻譯 → dedupe → 存檔。內容是空的就回傳 None,讓呼叫端決定怎麼處理。
+
+    `category` 不給的話預設不分類(`None`);來自訂閱來源的文章由呼叫端
+    (`sync_feed_subscription()`)傳入該訂閱目前設定的分類,分類是存在文件上
+    的固定值,之後訂閱的分類改了不會回頭影響已經存進去的文件(跟 `feeds
+    remove` 不影響已存文件是同一個設計原則)。
+    """
+    document.category = category
     document.tags = get_tagging_provider().tag(document)
     chunks = chunk_document(document)
 
@@ -108,7 +115,7 @@ def sync_feed_subscription(feed: FeedSubscription, limit: int | None = None) -> 
 
     added = updated = skipped = 0
     for document in documents:
-        result = ingest_document(document)
+        result = ingest_document(document, category=feed.category)
         if result is None:
             skipped += 1
         elif result.status == "added":

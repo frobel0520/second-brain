@@ -14,10 +14,24 @@ def find_documents(
     created_before: datetime | None = None,
     keyword: str | None = None,
     source: str | None = None,
+    category: str | None = None,
 ) -> list[DocumentSummary]:
     return sqlite_store.find_documents(
-        created_after=created_after, created_before=created_before, keyword=keyword, source=source
+        created_after=created_after,
+        created_before=created_before,
+        keyword=keyword,
+        source=source,
+        category=category,
     )
+
+
+def list_categories() -> list[str]:
+    return sqlite_store.list_categories()
+
+
+def set_document_categories(document_ids: list[str], category: str) -> int:
+    """把一批文件的分類都設成同一個值,回傳實際更新的筆數。"""
+    return sqlite_store.bulk_update_category(document_ids, category)
 
 
 def save_document(document: Document, chunks: list[Chunk]) -> None:
@@ -126,14 +140,28 @@ def search_similar(query_embedding: list[float], top_k: int = 5) -> list[SearchR
     return results
 
 
-def subscribe_feed(url: str, name: str) -> FeedSubscription | None:
+def subscribe_feed(url: str, name: str, category: str | None = None) -> FeedSubscription | None:
     """把一個 RSS/Atom 來源加進訂閱清單。同一個網址已經訂閱過就回傳 None。"""
     if sqlite_store.get_feed_subscription_by_url(url) is not None:
         return None
 
-    feed = FeedSubscription(id=str(uuid.uuid4()), url=url, name=name)
+    feed = FeedSubscription(id=str(uuid.uuid4()), url=url, name=name, category=category)
     sqlite_store.insert_feed_subscription(feed)
     return feed
+
+
+def update_feed_category(url: str, category: str | None) -> FeedSubscription | None:
+    """更新一個已訂閱來源的分類,只影響之後同步進來的新文章,不會回頭改已經存在的文件。
+
+    回傳更新後的訂閱紀錄;找不到這個網址就回傳 None。
+    """
+    existing = sqlite_store.get_feed_subscription_by_url(url)
+    if existing is None:
+        return None
+
+    sqlite_store.update_feed_category(url, category)
+    existing.category = category
+    return existing
 
 
 def list_feed_subscriptions() -> list[FeedSubscription]:

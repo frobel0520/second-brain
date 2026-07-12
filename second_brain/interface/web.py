@@ -24,12 +24,15 @@ from second_brain.retrieval.search import search as run_search
 from second_brain.storage import (
     find_documents,
     get_document,
+    list_categories,
     list_documents,
     list_feed_subscriptions,
     remove_document,
     remove_documents,
+    set_document_categories,
     subscribe_feed,
     unsubscribe_feed,
+    update_feed_category,
 )
 
 st.set_page_config(page_title="Second Brain", page_icon="📚", layout="wide")
@@ -53,11 +56,25 @@ tab_browse, tab_search, tab_ask, tab_add, tab_feeds = st.tabs(
 with tab_browse:
     if "batch_delete_message" in st.session_state:
         st.success(st.session_state.pop("batch_delete_message"))
+    if "batch_category_message" in st.session_state:
+        st.success(st.session_state.pop("batch_category_message"))
 
-    documents = list_documents()
+    existing_categories = list_categories()
+    browse_category = st.selectbox(
+        "分類篩選", options=["全部"] + existing_categories, key="browse-category-filter"
+    )
+
+    documents = (
+        list_documents() if browse_category == "全部" else find_documents(category=browse_category)
+    )
 
     if not documents:
-        st.info("知識庫是空的,先到「新增筆記」加一些內容吧。")
+        message = (
+            "知識庫是空的,先到「新增筆記」加一些內容吧。"
+            if browse_category == "全部"
+            else f"沒有分類是「{browse_category}」的文件。"
+        )
+        st.info(message)
     else:
         for document in documents:
             with st.container(border=True):
@@ -68,6 +85,8 @@ with tab_browse:
                         f"  ·  {document.chunk_count} 個片段"
                         f"  ·  {document.created_at.astimezone(DISPLAY_TIMEZONE):%Y-%m-%d %H:%M}"
                     )
+                    if document.category:
+                        st.caption(f"📁 {document.category}")
                     if document.tags:
                         st.caption("🏷️ " + "、".join(document.tags))
                     st.caption(document.source_path)
@@ -138,12 +157,78 @@ with tab_browse:
             st.session_state["batch-confirm"] = False
             st.rerun()
 
+    st.divider()
+
+    st.subheader("批次設定分類")
+    st.caption(
+        "篩選邏輯跟上面批次刪除一樣(符合任一個條件就列入,日期範圍例外是 AND)。"
+        "用在幫既有文件補分類,例如透過一次性訂閱加入、沒有訂閱紀錄可以依循的文章。"
+    )
+
+    col_cat_after, col_cat_before = st.columns(2)
+    with col_cat_after:
+        category_batch_after = st.date_input("加入時間之後(含)", value=None, key="category-batch-after")
+    with col_cat_before:
+        category_batch_before = st.date_input("加入時間之前(含)", value=None, key="category-batch-before")
+
+    category_batch_keyword = st.text_input("關鍵字(標題/內容/標籤)", key="category-batch-keyword")
+    category_batch_source = st.text_input("來源路徑或網址包含", key="category-batch-source")
+    new_category_value = st.text_input("要設定的分類", key="category-batch-value")
+
+    if st.button("預覽符合的文件", key="category-batch-preview"):
+        if not any(
+            [category_batch_after, category_batch_before, category_batch_keyword, category_batch_source]
+        ):
+            st.warning("至少要給一個篩選條件。")
+            st.session_state["category_batch_matches"] = []
+        else:
+            cat_after_dt = (
+                datetime.combine(category_batch_after, time.min).replace(tzinfo=timezone.utc)
+                if category_batch_after
+                else None
+            )
+            cat_before_dt = (
+                datetime.combine(category_batch_before, time(23, 59, 59, 999999)).replace(tzinfo=timezone.utc)
+                if category_batch_before
+                else None
+            )
+            st.session_state["category_batch_matches"] = find_documents(
+                created_after=cat_after_dt,
+                created_before=cat_before_dt,
+                keyword=category_batch_keyword or None,
+                source=category_batch_source or None,
+            )
+
+    category_batch_matches = st.session_state.get("category_batch_matches", [])
+
+    if category_batch_matches:
+        st.write(f"符合條件的文件共 {len(category_batch_matches)} 筆:")
+        for match in category_batch_matches:
+            created = match.created_at.astimezone(DISPLAY_TIMEZONE)
+            current_category = f"[{match.category}]" if match.category else "[未分類]"
+            st.write(f"- {created:%Y-%m-%d %H:%M}  {current_category}  {match.title}  ({match.source_path})")
+
+        if new_category_value and st.button("套用這個分類", type="primary", key="category-batch-apply"):
+            updated_count = set_document_categories(
+                [match.id for match in category_batch_matches], new_category_value
+            )
+            st.session_state["batch_category_message"] = (
+                f"已將 {updated_count} 筆文件的分類設成「{new_category_value}」。"
+            )
+            st.session_state["category_batch_matches"] = []
+            st.rerun()
+        elif not new_category_value:
+            st.caption("要先在上面填分類名稱,才能套用。")
+
 with tab_search:
     query = st.text_input("搜尋知識庫", placeholder="想搜尋的內容")
     top_k = st.slider("回傳筆數", min_value=1, max_value=20, value=5, key="search-top-k")
+    search_category = st.selectbox(
+        "限定分類", options=["全部"] + list_categories(), key="search-category"
+    )
 
     if query:
-        results = run_search(query, top_k=top_k)
+        results = run_search(query, top_k=top_k, category=None if search_category == "全部" else search_category)
 
         if not results:
             st.info("沒有找到相關內容。")
@@ -158,10 +243,13 @@ with tab_search:
 with tab_ask:
     question = st.text_input("問知識庫一個問題", placeholder="想問的問題")
     ask_top_k = st.slider("檢索筆數", min_value=1, max_value=20, value=5, key="ask-top-k")
+    ask_category = st.selectbox("限定分類", options=["全部"] + list_categories(), key="ask-category")
 
     if question:
         try:
-            ask_result = run_ask(question, top_k=ask_top_k)
+            ask_result = run_ask(
+                question, top_k=ask_top_k, category=None if ask_category == "全部" else ask_category
+            )
         except (anthropic.AuthenticationError, TypeError) as error:
             if isinstance(error, TypeError) and "authentication" not in str(error).lower():
                 raise
@@ -181,13 +269,14 @@ with tab_ask:
 with tab_add:
     st.subheader("上傳檔案")
     uploaded_file = st.file_uploader("選擇 markdown/text 檔案", type=["md", "markdown", "txt"])
+    upload_category = st.text_input("分類(留空不分類)", key="upload-category")
 
     if uploaded_file is not None and st.button("加入這個檔案"):
         with tempfile.TemporaryDirectory() as tmp_dir:
             tmp_path = Path(tmp_dir) / uploaded_file.name
             tmp_path.write_bytes(uploaded_file.getvalue())
             document = load_document(tmp_path)
-            result = ingest_document(document)
+            result = ingest_document(document, category=upload_category or None)
 
         if result is None:
             st.warning("檔案內容是空的,沒有東西可以加入。")
@@ -201,6 +290,7 @@ with tab_add:
     st.subheader("訂閱 RSS/Atom")
     feed_url = st.text_input("Feed 網址")
     limit = st.number_input("最多抓幾篇", min_value=1, max_value=50, value=10)
+    add_feed_category = st.text_input("分類(留空不分類)", key="add-feed-category")
 
     if feed_url and st.button("抓取這個訂閱來源"):
         try:
@@ -214,7 +304,7 @@ with tab_add:
                 added = 0
                 skipped = 0
                 for feed_document in feed_documents:
-                    feed_result = ingest_document(feed_document)
+                    feed_result = ingest_document(feed_document, category=add_feed_category or None)
                     if feed_result is None:
                         skipped += 1
                         continue
@@ -253,8 +343,22 @@ with tab_feeds:
                         if feed.last_synced_at
                         else "尚未同步"
                     )
-                    st.markdown(f"**{feed.name}**")
+                    category_label = feed.category or "未分類"
+                    st.markdown(f"**{feed.name}**  ·  📁 {category_label}")
                     st.caption(f"{feed.url}  ·  上次同步:{last_synced}")
+                    col_category, col_category_button = st.columns([3, 1])
+                    with col_category:
+                        new_category_input = st.text_input(
+                            "更新分類",
+                            value=feed.category or "",
+                            key=f"category-input-{feed.id}",
+                            label_visibility="collapsed",
+                        )
+                    with col_category_button:
+                        if st.button("更新分類", key=f"category-update-{feed.id}"):
+                            update_feed_category(feed.url, new_category_input or None)
+                            st.success("已更新分類(只影響之後同步的新文章)")
+                            st.rerun()
                 with col_sync:
                     if st.button("同步", key=f"sync-{feed.id}"):
                         sync_result = sync_feed_subscription(feed)
@@ -275,13 +379,14 @@ with tab_feeds:
     st.subheader("新增訂閱")
     new_feed_url = st.text_input("Feed 網址", key="subscribe-feed-url")
     new_feed_name = st.text_input("顯示名稱(留空會自動抓 feed 標題)", key="subscribe-feed-name")
+    new_feed_category = st.text_input("分類(留空不分類,之後同步的文章都會標上這個分類)", key="subscribe-feed-category")
     new_feed_limit = st.number_input(
         "第一次同步最多抓幾篇", min_value=1, max_value=50, value=10, key="subscribe-feed-limit"
     )
 
     if new_feed_url and st.button("訂閱這個來源"):
         display_name = new_feed_name or get_feed_title(new_feed_url) or new_feed_url
-        new_feed = subscribe_feed(new_feed_url, display_name)
+        new_feed = subscribe_feed(new_feed_url, display_name, category=new_feed_category or None)
 
         if new_feed is None:
             st.warning(f"已經訂閱過這個來源了:{new_feed_url}")

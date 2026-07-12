@@ -3,6 +3,7 @@ from second_brain.storage.store import (
     find_documents,
     get_document,
     list_all_chunks,
+    list_categories,
     list_documents,
     list_documents_missing_translation,
     list_feed_subscriptions,
@@ -12,8 +13,10 @@ from second_brain.storage.store import (
     replace_existing_document,
     save_document,
     search_similar,
+    set_document_categories,
     subscribe_feed,
     unsubscribe_feed,
+    update_feed_category,
     update_translated_content,
 )
 
@@ -22,6 +25,7 @@ __all__ = [
     "find_documents",
     "get_document",
     "list_all_chunks",
+    "list_categories",
     "list_documents",
     "list_documents_missing_translation",
     "list_feed_subscriptions",
@@ -31,7 +35,9 @@ __all__ = [
     "replace_existing_document",
     "save_document",
     "search_similar",
+    "set_document_categories",
     "subscribe_feed",
     "unsubscribe_feed",
+    "update_feed_category",
     "update_translated_content",
 ]

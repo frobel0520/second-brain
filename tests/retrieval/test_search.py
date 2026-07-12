@@ -85,3 +85,28 @@ def test_search_ranks_exact_keyword_match_first_when_semantic_scores_tie() -> No
     results = search("sqlite-utils", top_k=3)
 
     assert results[0].document.id == "doc-keyword"
+
+
+def test_search_filters_by_category() -> None:
+    cat_doc = Document(
+        id="doc-cat", source_path="/tmp/cat.md", title="貓咪筆記", content="這是一篇關於貓的筆記。", category="新聞"
+    )
+    cat_doc_tech = Document(
+        id="doc-cat-tech",
+        source_path="/tmp/cat-tech.md",
+        title="貓咪科技筆記",
+        content="這是另一篇關於貓的筆記。",
+        category="科技",
+    )
+    _add(cat_doc)
+    _add(cat_doc_tech)
+
+    results = search("貓在哪裡", top_k=5, category="新聞")
+
+    assert [result.document.id for result in results] == ["doc-cat"]
+
+
+def test_search_returns_empty_list_when_category_has_no_documents() -> None:
+    _add(Document(id="doc-cat", source_path="/tmp/cat.md", title="貓咪筆記", content="這是一篇關於貓的筆記。", category="新聞"))
+
+    assert search("貓在哪裡", category="財經") == []

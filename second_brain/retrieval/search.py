@@ -29,16 +29,22 @@ def _normalize(scores: dict[str, float]) -> dict[str, float]:
     return {chunk_id: (value - lo) / (hi - lo) for chunk_id, value in scores.items()}
 
 
-def search(query: str, top_k: int = 5) -> list[SearchResult]:
+def search(query: str, top_k: int = 5, category: str | None = None) -> list[SearchResult]:
+    """`category` 不給就搜全部;給的話只在該分類的文件裡搜尋——語意跟 BM25
+    兩邊都先篩掉其他分類的 chunk 再各自正規化,避免其他分類的分數尺度影響
+    這次搜尋的排名基準。
+    """
     provider = get_embedding_provider()
     [query_embedding] = provider.embed([query])
     all_semantic = search_similar(query_embedding, top_k=_ALL_CHUNKS_TOP_K)
+    if category is not None:
+        all_semantic = [result for result in all_semantic if result.document.category == category]
     if not all_semantic:
         return []
 
     semantic_scores = {result.chunk.id: result.score for result in all_semantic}
     normalized_semantic = _normalize(semantic_scores)
-    normalized_keyword = _normalize(keyword_scores(query))
+    normalized_keyword = _normalize(keyword_scores(query, chunks=[result.chunk for result in all_semantic]))
 
     combined_scores = {
         chunk_id: SEMANTIC_WEIGHT * normalized_semantic.get(chunk_id, 0.0)

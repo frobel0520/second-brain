@@ -4,15 +4,21 @@
 使用方式看 [README.md](README.md),規劃看 [CLAUDE.md](CLAUDE.md)。這份只記錄
 「現在做到哪、為什麼這樣做、接下來大概要做什麼」,每次做完一個階段性任務就更新。
 
-最後更新:2026-07-12(第九輪,做完 hybrid search)
+最後更新:2026-07-12(第十輪,訂閱三個台灣財經 RSS 來源 + 做完文件分類功能)
 
 ## 現況一句話
 
 CLAUDE.md 的 MVP 加上這些都做完了:`list`/`remove`/`clear`/`add-feed`/自動
 打標籤/Streamlit 網頁介面/一鍵啟動/feed 訂閱清單(CLI+網頁)/`search`/`ask`
 顯示時間/`remove-batch` 批次刪除(CLI+網頁)/UTC+8 時間顯示/翻譯成繁體中文
-(第七輪)/**hybrid search**(第九輪,語意 + BM25 關鍵字搜尋加權合併,見下面
-專節)。**第九輪的程式碼還沒 commit**,交接時記得先確認有沒有人接手 commit。
+(第七輪)/hybrid search(第九輪,已 commit 進 `f44d231`)/**文件分類**
+(第十輪,`科技`/`新聞`/`財經` 三個分類,`list`/`search`/`ask`/瀏覽頁面都能
+按分類篩選,見下面專節)。**第十輪的程式碼還沒 commit**,交接時記得先確認
+有沒有人接手 commit。
+
+**第十輪也訂閱了三個新的台灣財經 RSS 來源**(經濟日報/自由時報財經版/
+Yahoo股市),知識庫現在有 6 個訂閱來源(3 科技 + 3 財經),90 篇文件全部
+已分類完畢(科技 33、財經 47、新聞 10),細節見下面專節。
 
 **第八輪沒有改程式碼,做了兩件事**:(1) 使用者回饋第七輪的翻譯功能「其實好像
 還好」,實際閱讀習慣是「想細看的文章再點進去用 Google 自動翻譯」,不需要整個
@@ -40,21 +46,23 @@ CLAUDE.md 的 MVP 加上這些都做完了:`list`/`remove`/`clear`/`add-feed`/�
 
 ## 已經做完的東西
 
-十三個 CLI 指令全部能動,架構細節看 [README.md](README.md#架構):
+十五個 CLI 指令全部能動,架構細節看 [README.md](README.md#架構):
 
-1. `second-brain add <file>` — 讀 md/txt → 自動打標籤(本機 jieba 詞頻抽取)→ 切塊 → embedding(本機 sentence-transformers)→ 存 SQLite + ChromaDB。**同一份筆記再 add 一次會先刪舊版本再存新的**(`storage/store.py:replace_existing_document`),不是 append。「同一份筆記」的判斷邏輯之前升級過,見下面決策說明。
-2. `second-brain add-feed <feed_url> [--limit/-n N]` — **一次性**抓取 RSS/Atom 來源,把每篇文章轉成一個 Document,跑同一套 `ingest_document()` 流程(標籤/切塊/embedding/dedupe/存檔),不會記住這個來源。這輪用真實的 BBC News 網址實測過,見下面專節說明。
-3. `second-brain search "<query>" [--top-k K]` — **第九輪改成 hybrid search**:語意搜尋(query 轉 embedding → ChromaDB cosine 相似度)+ BM25 關鍵字搜尋兩種分數正規化後加權合併,印出來源+**合併後的分數**+加入時間(時間是第四輪加的,`Document.created_at` 本來就有,只是沒印出來)。細節見下面「hybrid search」專節。
-4. `second-brain ask "<query>" [--top-k K]` — 在 search 結果上組 context,呼叫 Anthropic API(`claude-opus-4-8`,寫死在 `config.ANSWER_MODEL`)做 RAG 問答。**第四輪把 `ask()` 的回傳型別從純字串改成 `AskResult(answer, sources)` dataclass**,CLI 在答案下面多印一段「來源:標題(時間)」清單,見下面決策說明。
-5. `second-brain list` — 列出知識庫裡的文件(標題、片段數、來源路徑、標籤)。
+1. `second-brain add <file> [--category/-c C]` — 讀 md/txt → 自動打標籤(本機 jieba 詞頻抽取)→ 切塊 → embedding(本機 sentence-transformers)→ 存 SQLite + ChromaDB。**同一份筆記再 add 一次會先刪舊版本再存新的**(`storage/store.py:replace_existing_document`),不是 append。「同一份筆記」的判斷邏輯之前升級過,見下面決策說明。`--category` 是**第十輪新加**,不給就不分類。
+2. `second-brain add-feed <feed_url> [--limit/-n N] [--category/-c C]` — **一次性**抓取 RSS/Atom 來源,把每篇文章轉成一個 Document,跑同一套 `ingest_document()` 流程(標籤/切塊/embedding/dedupe/存檔),不會記住這個來源。這輪用真實的 BBC News 網址實測過,見下面專節說明。`--category` 是**第十輪新加**。
+3. `second-brain search "<query>" [--top-k K] [--category/-c C]` — **第九輪改成 hybrid search**:語意搜尋(query 轉 embedding → ChromaDB cosine 相似度)+ BM25 關鍵字搜尋兩種分數正規化後加權合併,印出來源+**合併後的分數**+加入時間(時間是第四輪加的,`Document.created_at` 本來就有,只是沒印出來)。細節見下面「hybrid search」專節。`--category` 是**第十輪新加**,限定只在該分類的文件裡搜尋,見下面「文件分類」專節。
+4. `second-brain ask "<query>" [--top-k K] [--category/-c C]` — 在 search 結果上組 context,呼叫 Anthropic API(`claude-opus-4-8`,寫死在 `config.ANSWER_MODEL`)做 RAG 問答。**第四輪把 `ask()` 的回傳型別從純字串改成 `AskResult(answer, sources)` dataclass**,CLI 在答案下面多印一段「來源:標題(時間)」清單,見下面決策說明。`--category` 是**第十輪新加**。
+5. `second-brain list [--category/-c C]` — 列出知識庫裡的文件(標題、片段數、來源路徑、標籤)。`--category` 是**第十輪新加**,只列出該分類的文件,標題前面會加 `[分類]` 前綴。
 6. `second-brain remove <source>` — 從知識庫刪除指定來源的紀錄(sqlite + chroma),不動硬碟上的檔案本身。純比對 `source_path`,**不會**做內容比對(remove 是明確指名要刪哪個來源,跟 add 的模糊 dedupe 語意不一樣)。`source` 參數型別**這輪改成 `str`,不是 `Path`**,而且**沒有** `exists=True`,因為要能刪除已經從硬碟上消失的檔案的舊紀錄,也要能刪 RSS 文章的網址(見下面決策說明的 bug 修復)。
 7. `second-brain clear [--yes/-y]` — 清空整個知識庫(sqlite + chroma)。預設用 `typer.confirm()` 互動確認,`--yes`/`-y` 跳過確認直接清空(給腳本/非互動情境用)。不動硬碟上的原始檔案。
-8. `second-brain feeds add <feed_url> [--name] [--limit/-n N]` — 把來源加進訂閱清單(SQLite `feeds` 表)並立刻同步一次;`--name` 不給的話會嘗試呼叫 `rss_loader.get_feed_title()` 抓 feed 頻道標題,抓不到就用網址本身當名稱。同一個網址重複 `feeds add` 會被拒絕(印出「已經訂閱過」,exit code 1),不會建立第二筆訂閱紀錄。內部直接呼叫 `sync_feed_subscription()` 做第一次同步,不會自己重複一遍 load/ingest 迴圈。
-9. `second-brain feeds list` — 列出訂閱清單:名稱、網址、上次同步時間(`尚未同步` 或時間戳)。
+8. `second-brain feeds add <feed_url> [--name] [--limit/-n N] [--category/-c C]` — 把來源加進訂閱清單(SQLite `feeds` 表)並立刻同步一次;`--name` 不給的話會嘗試呼叫 `rss_loader.get_feed_title()` 抓 feed 頻道標題,抓不到就用網址本身當名稱。同一個網址重複 `feeds add` 會被拒絕(印出「已經訂閱過」,exit code 1),不會建立第二筆訂閱紀錄。內部直接呼叫 `sync_feed_subscription()` 做第一次同步,不會自己重複一遍 load/ingest 迴圈。`--category` 是**第十輪新加**,之後每次同步進來的文章都會標上這個分類。
+9. `second-brain feeds list` — 列出訂閱清單:名稱、**分類**(第十輪新加,`[未分類]` 或分類名稱)、網址、上次同步時間(`尚未同步` 或時間戳)。
 10. `second-brain feeds remove <feed_url>` — 從訂閱清單移除來源(刪 `feeds` 表那一列),**不會**動到已經加入知識庫的文章——訂閱清單只是「要不要繼續追蹤」的紀錄,跟文章本身是否留在知識庫是兩件事,要連文章一起刪要另外用 `second-brain remove <文章網址>`。
-11. `second-brain feeds sync [--limit/-n N]` — 同步訂閱清單裡的**所有**來源:對每個訂閱依序呼叫 `sync_feed_subscription()`,更新 `last_synced_at`,印出每個來源「新增 X 篇、更新 Y 篇、略過 Z 篇」。**單一來源抓取/解析失敗不會擋住其他來源**——`pipeline.sync_feed_subscription()` 把例外包進 `FeedSyncResult.error`,不會往外拋,`feeds sync` 對每個來源印出「同步失敗:{原因}」後繼續處理下一個。
-12. `second-brain remove-batch [--after DATE] [--before DATE] [--keyword K] [--source S] [--yes/-y]` — 依日期範圍/關鍵字/來源批次刪除文件,三個條件是**使用者要求的 OR**(符合任一個就刪,不是同時符合),`--after`/`--before` 兩個一起給是例外、彼此是 AND(定義一段區間)。**至少要給一個條件**,不然要用 `clear`。刪除前會列出符合的文件並要求確認(跟 `clear` 同樣的安全機制,`--yes` 可跳過)。日期格式是 `YYYY-MM-DD`,格式錯會被 typer 擋下來,不會靜默失敗。底層是 `storage/sqlite_store.py:find_documents()`,用動態組出的 `WHERE (cond1) OR (cond2) OR (cond3)` 查詢,`storage.remove_documents(ids)` 批次刪。**第五輪在網頁介面「瀏覽」分頁下方加了對應的批次刪除區塊**,同一套底層函式,UX 是「篩選條件 → 預覽符合的文件 → 勾選確認 → 刪除這些文件」四步驟,細節見下面決策說明。
-13. `second-brain translate` — **第七輪新加**。幫知識庫裡還沒有翻譯(`translated_content IS NULL`)的文件補上繁體中文翻譯,需要 `ANTHROPIC_API_KEY`。跟 `add`/`add-feed`/`feeds` 的自動翻譯不同,這個指令是使用者主動要求,遇到認證失敗會直接停止並清楚回報(印出跟 `ask` 一樣的「找不到有效的 Anthropic API key」訊息),不會對每篇文件都重複噴出同一個錯誤;其他非認證類的單篇翻譯失敗只計進失敗數,不影響其他篇繼續翻。網頁介面沒有對應功能(批次翻譯可能要跑一段時間,先留在 CLI)。
+11. `second-brain feeds sync [--limit/-n N]` — 同步訂閱清單裡的**所有**來源:對每個訂閱依序呼叫 `sync_feed_subscription()`,更新 `last_synced_at`,印出每個來源「新增 X 篇、更新 Y 篇、略過 Z 篇」。**單一來源抓取/解析失敗不會擋住其他來源**——`pipeline.sync_feed_subscription()` 把例外包進 `FeedSyncResult.error`,不會往外拋,`feeds sync` 對每個來源印出「同步失敗:{原因}」後繼續處理下一個。**每次同步時,凡是這次有被抓回來的文章都會用該訂閱目前的分類重新蓋掉分類**(見下面「文件分類」專節),這是刻意的行為,不是副作用;但**只有這次同步真的抓到的文章會被蓋**,已經滾出 feed 目前回傳範圍的舊文章不會被觸碰到,分類要嘛維持原樣、要嘛(如果從來沒被同步過)維持未分類,細節見下面的已知限制。
+12. `second-brain feeds set-category <feed_url> <category>` — **第十輪新加**。更新一個已訂閱來源的分類,只影響**之後**同步進來的新文章,不會回頭改已經存在的文件——舊文件要改分類要用下面的 `set-category` 指令。
+13. `second-brain remove-batch [--after DATE] [--before DATE] [--keyword K] [--source S] [--yes/-y]` — 依日期範圍/關鍵字/來源批次刪除文件,三個條件是**使用者要求的 OR**(符合任一個就刪,不是同時符合),`--after`/`--before` 兩個一起給是例外、彼此是 AND(定義一段區間)。**至少要給一個條件**,不然要用 `clear`。刪除前會列出符合的文件並要求確認(跟 `clear` 同樣的安全機制,`--yes` 可跳過)。日期格式是 `YYYY-MM-DD`,格式錯會被 typer 擋下來,不會靜默失敗。底層是 `storage/sqlite_store.py:find_documents()`,用動態組出的 `WHERE (cond1) OR (cond2) OR (cond3)` 查詢,`storage.remove_documents(ids)` 批次刪。**第五輪在網頁介面「瀏覽」分頁下方加了對應的批次刪除區塊**,同一套底層函式,UX 是「篩選條件 → 預覽符合的文件 → 勾選確認 → 刪除這些文件」四步驟,細節見下面決策說明。
+14. `second-brain set-category <category> [--after DATE] [--before DATE] [--keyword K] [--source S] [--yes/-y]` — **第十輪新加**。跟 `remove-batch` 一模一樣的篩選邏輯跟安全機制(預覽 → 確認 → 執行),差別是把符合條件的文件分類**設成同一個值**,不是刪除。主要用途是幫既有文件補分類(例如透過一次性 `add-feed` 加入、沒有訂閱紀錄可以依循的文章),細節見下面「文件分類」專節。
+15. `second-brain translate` — **第七輪新加**。幫知識庫裡還沒有翻譯(`translated_content IS NULL`)的文件補上繁體中文翻譯,需要 `ANTHROPIC_API_KEY`。跟 `add`/`add-feed`/`feeds` 的自動翻譯不同,這個指令是使用者主動要求,遇到認證失敗會直接停止並清楚回報(印出跟 `ask` 一樣的「找不到有效的 Anthropic API key」訊息),不會對每篇文件都重複噴出同一個錯誤;其他非認證類的單篇翻譯失敗只計進失敗數,不影響其他篇繼續翻。網頁介面沒有對應功能(批次翻譯可能要跑一段時間,先留在 CLI)。
 
 **自動打標籤**(是「自動化處理」這個大方向的第一小步):`add`/`add-feed` 讀進文件後會呼叫 `processing/tagging.py` 的 `get_tagging_provider().tag(document)`,把結果存進 `Document.tags`(SQLite `documents.tags` 欄位,JSON 字串)。`list`/`add`/`add-feed` 的輸出訊息都會顯示標籤。`TaggingProvider` 是抽象介面(跟 `EmbeddingProvider` 同樣的設計慣例),目前唯一實作是 `KeywordFrequencyTaggingProvider`:用 jieba 斷詞(中文)+ 保留原樣的英文單字,濾掉停用詞,取詞頻最高的前 `config.MAX_TAGS`(預設 5)個當標籤。之後要換成 LLM 分類或規則式邏輯,只要換掉 `get_tagging_provider()` 回傳的實作。
 
@@ -66,6 +74,18 @@ CLAUDE.md 的 MVP 加上這些都做完了:`list`/`remove`/`clear`/`add-feed`/�
   - **把斷詞邏輯從 `tagging.py` 抽成共用模組** `second_brain/processing/text.py`(`tokenize()` 函式,含 jieba 斷詞 + 停用詞過濾 + 長度/字元過濾),自動標籤跟 BM25 關鍵字搜尋現在共用同一套斷詞規則,不是分別各兜一份——`tagging.py` 原本的 `_tokenize()`/`_STOPWORDS`/`_MEANINGFUL_TOKEN` 整段搬過去,行為完全沒變(舊的 tagging 測試沒改也全過)。
   - 實測過真實知識庫:`second-brain search "sqlite-utils"` 前五名全部來自那篇 `sqlite-utils 4.1` 文章(分數 1.000 → 0.667),含精確字串的 chunk 排最前面。
   - **測試踩到一個值得記錄的細節,不是 bug,是 BM25 演算法本身的特性**:一開始寫 `keyword_scores` 的測試只用兩篇文件,結果 BM25 的 idf 剛好算出 0(`log(1.5/1.5) = 0`,corpus 只有兩篇、詞只出現在其中一篇時的數學巧合),測試「碰巧」通過但完全沒驗證到真正的排序邏輯。**改成三篇文件之後 idf 才有意義**,測試才是真的在測東西。**教訓**:BM25 相關的測試至少要三篇以上不同文件的語料,不能只用兩篇,不然 idf 可能算出退化值讓測試變成只是巧合通過。
+
+**文件分類(第十輪新加)**:使用者想把知識庫的文章分成 `科技`/`新聞`/`財經` 三類,瀏覽頁面能按分類過濾。實作前問過使用者兩個問題:(1) 分類要怎麼決定——選項是「依訂閱來源固定分類」/「自動關鍵字判斷」/「純手動」,使用者選**依訂閱來源固定分類**;(2) 分類要怎麼用——使用者選**瀏覽頁面過濾 + search/ask 限定分類搜尋**(兩個都要)。
+  - **`Document`/`FeedSubscription`/`DocumentSummary` 都加了 `category: str | None` 欄位**,自由文字(不是寫死的 enum),SQLite `documents`/`feeds` 兩個表都加了 `category TEXT` 欄位(用跟 `translated_content` 同一套 `_ensure_column()` migration 機制補欄位,這輪把 `_ensure_translated_content_column` 順手重構成通用的 `_ensure_column(conn, table, column, ddl)`,因為現在有三個地方要補欄位,值得抽成共用函式)。
+  - **分類是存在 `Document` 上的固定值,不是靠即時 join `feeds` 表算出來的**:`ingestion/pipeline.py:ingest_document(document, category=None)` 在存檔前把 `category` 蓋到 `document.category` 上,`sync_feed_subscription()` 呼叫時傳入 `feed.category`。這是刻意的設計,跟這個專案一貫的原則一致(`feeds remove` 不影響已存文件)——如果分類是即時 join 出來的,那訂閱來源被取消或改分類時,已經存進去的文件的分類會跟著憑空消失/改變,這不是想要的行為。**代價**:`feeds set-category` 之後只影響「之後同步進來的新文章」,舊文件不會自動更新分類,要嘛靠下次同步時該文章剛好還在 feed 回傳範圍內順便更新,要嘛用 `second-brain set-category` 手動批次改。
+  - **`second-brain set-category`(CLI)/網頁介面「批次設定分類」是新增的,不是 `remove-batch` 的變形,但共用同一套篩選邏輯**(`storage.find_documents()` 的 date/keyword/source OR 篩選 + 新加的 `category` AND 篩選)。主要用途:幫沒有訂閱紀錄可以依循的文件補分類(見下面「財經 RSS 訂閱與分類回填」專節裡 BBC 文章的例子),或修正分類分錯的文件。
+  - **hybrid search(`retrieval/search.py:search()`)加了 `category` 參數**:給了的話,語意搜尋跟 BM25 兩邊都先篩掉其他分類的 chunk,再各自正規化——這是為了讓正規化的 min/max 基準只反映這個分類內的分數分布,不會被其他分類的分數尺度影響排名。`keyword_search.keyword_scores()` 也加了可選的 `chunks` 參數,讓呼叫端可以傳入篩選過的子集合當 BM25 語料,不用改成每次都重新查全部。`ask()` 原樣把 `category` 傳給 `search()`。
+  - **CLI 跟網頁介面完整對稱**:`add`/`add-feed`/`feeds add` 都有 `--category`;`list`/`search`/`ask` 都有 `--category` 篩選;`feeds set-category` 改訂閱分類;`set-category` 批次改文件分類。網頁介面「瀏覽」分頁加分類篩選下拉選單 + 每篇文件顯示 `📁 分類` + 批次設定分類區塊(跟批次刪除同樣的「篩選條件 → 預覽 → 套用」流程,UI 直接照抄批次刪除那段的結構,沒有重新設計);「搜尋」/「問答」分頁加「限定分類」下拉選單;「訂閱管理」分頁每個訂閱顯示分類 + 一個小的文字輸入框+按鈕可以現場改分類;「新增筆記」分頁的上傳檔案/一次性訂閱表單都加了分類輸入框。
+  - **手動驗證時真的用 Streamlit 網頁介面走過一次**:啟動 `streamlit run` 開瀏覽器確認分類篩選下拉選單、文件的 `📁 分類` 標籤、訂閱清單的分類顯示跟編輯欄位都正常渲染,沒有停留在「程式碼看起來對」就結束。**這輪剛好撞到另一個對話 session 也在跑同一個 `second-brain-web` 開發伺服器(同一個 `port: 8501`)**,`.claude/launch.json` 加了 `"autoPort": true` 解決衝突(讓 harness 自動換一個空的 port),這個設定檔的改動之後也不用改回去,不影響其他人正常使用。
+
+**財經 RSS 訂閱與分類回填(第十輪)**:使用者想加財經類的來源,先用 `WebSearch`/瀏覽器找了幾個台灣財經媒體的 RSS 網址、逐一用 `feedparser.parse()` 實際驗證過抓得到文章(不是憑空猜網址),列出候選讓使用者選,使用者選了 3 個:**經濟日報**(`https://money.udn.com/rssfeed/news/1001/5588`)、**自由時報財經版**(`https://news.ltn.com.tw/rss/business.xml`)、**Yahoo股市**(`https://tw.stock.yahoo.com/rss?category=news`),都用 `feeds add` 訂閱並各抓了 10 篇。
+  - **分類回填的完整過程**:先用 `feeds set-category` 把 6 個訂閱來源都設好分類(The Verge/HN/Simon Willison → 科技,新訂的 3 個財經來源 → 財經),再跑一次 `feeds sync` 讓**當下還在 feed 回傳範圍內**的文章重新蓋上分類。**這樣沒辦法涵蓋所有舊文件**:(1) 有幾篇比較早期加入、已經滾出 feed 目前回傳範圍的文章(經濟日報/自由時報財經版/Yahoo股市各有幾篇、Simon Willison 有 3 篇連結到外部網站的 linkblog 項目)沒被這次 resync 碰到,依然是未分類;(2) 知識庫裡另外有 10 篇 BBC 中文網文章,是很久以前用**一次性** `add-feed`(不是 `feeds add` 訂閱)加進來的,根本沒有對應的 `feeds` 表紀錄可以依循,「依訂閱來源固定分類」這個規則對它們完全不適用。**兩種情況都用 `second-brain set-category <分類> --source <網域關鍵字> --yes` 手動掃過去補齊**(例如 `--source bbc.com` 補 BBC 文章的「新聞」分類,`--source money.udn.com`/`ec.ltn.com.tw`/`yahoo.com` 補財經來源滾出視窗的舊文章)。**這個過程中犯了一次操作失誤**:掃 `yahoo.com` 網域補財經分類之後,又手滑對 `tw.news.yahoo.com` 這個子網域跑了一次「科技」分類(原意是想確認還有沒有漏網之魚,結果打錯分類值),把已經正確設成財經的幾篇文章覆蓋成科技,發現後立刻用同一個指令重新掃一次改回財經修正。**教訓**:`set-category`/`remove-batch` 這類批次操作在下指令前,即使有 `--yes` 想跳過確認,也應該先不加 `--yes` 看一下預覽的分類清單再決定,尤其是要覆蓋「已經設定過」的欄位時,打錯值不會有任何警告(跟刪除不一樣,刪除至少東西會消失比較容易發現,分類設定錯了不會有明顯徵兆,可能過一陣子才會發現)。
+  - **回填後最終結果**:90 篇文件全部分類完畢,科技 33 篇、財經 47 篇、新聞 10 篇,用 `sqlite_store.list_documents()` 直接查過 `category is None` 的數量確認是 0,不是只看 CLI 輸出的表面訊息。
 
 **RSS/Atom ingestion**(CLAUDE.md「更多 ingestion 來源」的第一個):`ingestion/rss_loader.py` 的 `load_feed(feed_url, limit=None) -> list[Document]`,用 `feedparser` 解析 feed,每個 entry 轉成一個 `Document`:
   - `source_path` 用文章的 `link`(dedupe/`remove` 都靠這個欄位比對,語意上等同本機檔案的路徑)
@@ -150,6 +170,10 @@ CLAUDE.md 的 MVP 加上這些都做完了:`list`/`remove`/`clear`/`add-feed`/�
 - **網頁介面的「新增筆記」完成後不會自動導去「瀏覽」分頁**,使用者要自己點過去才看得到剛加的東西(見上面決策說明)。
 - **網頁介面目前沒有針對大量文件的分頁/捲動優化**,跟 CLI 的 `list` 一樣是先求能動,文件一多畫面會變長。
 - **`streamlit` 是獨立的 optional dependency**(`pyproject.toml` 的 `[project.optional-dependencies].ui`),裝 `.[dev]` 不會自動裝到,要另外 `pip install -e ".[ui]"` 或 `.[dev,ui]`。
+- **第十輪:分類是自由文字,不是寫死的 enum**,CLI/網頁介面都不會擋你打錯字或打出跟現有分類不一致的新分類(例如手滑打成「財金」而不是「財經」),`list_categories()` 只會忠實反映資料庫裡實際出現過的值,打錯字不會被攔下來,要靠人工發現、用 `set-category` 修正。
+- **第十輪:`feeds set-category` 不會回頭改已經存在的文件**,只影響之後同步進來的新文章;舊文件要嘛靠下次同步時該文章剛好還在 feed 回傳範圍內順便更新,要嘛要另外用 `second-brain set-category` 手動批次改——這是刻意的設計(理由見上面「文件分類」決策說明),但代表**改一個訂閱來源的分類,不會馬上讓瀏覽頁面上這個來源的舊文章分類跟著變**,如果沒讀過決策說明容易誤以為是 bug。
+- **第十輪:RSS 來源分類回填只能靠「文章還在 feed 目前回傳範圍內」這個條件**,滾出範圍的舊文章不會在 resync 時自動被蓋上分類,需要額外用 `set-category --source <網域>` 手動掃。目前知識庫已經全部手動掃過一輪、沒有遺漏,但**之後如果又有新的一次性 `add-feed`(不是 `feeds add` 訂閱)加進來的文章**,一樣不會有分類,需要意識到這件事、記得手動補。
+- **第十輪:網頁介面「批次設定分類」的分類輸入是純文字框,沒有下拉選單提示既有分類**(瀏覽頁面的篩選跟搜尋/問答分頁的限定分類都是下拉選單,只有這個批次設定的地方是純文字輸入),想套用既有分類名稱要自己記得打一樣的字,容易手滑打錯(這輪的分類回填在 CLI 上就真的手滑打錯過一次,細節見上面決策說明)。之後如果要改進,可以考慮換成下拉選單 + 「新增分類」的組合輸入。
 - **第五輪:網頁介面批次刪除的「預覽符合的文件」結果存在 `st.session_state`,切換分頁或做其他操作不會自動清掉**,如果使用者預覽完之後跑去別的分頁刪了某篇筆記、又切回來直接勾確認刪除,實際刪除時是照「當初預覽的那份清單」執行(`remove_documents()` 用的是預覽當下記下的 id 列表),已經被刪掉的 id 會被 `remove_documents()` 靜默略過(`sqlite_store.get_document(id)` 找不到就跳過,不會報錯),不會導致誤刪別的東西,但如果知識庫在預覽之後有新增符合條件的文件,不會自動出現在待刪清單裡,要重新按一次「預覽符合的文件」才會抓到最新結果。
 - **第四輪:`remove-batch` 的 `--after`/`--before` 只支援 `YYYY-MM-DD` 絕對日期,沒有「N 天前」這種相對日期的簡寫**,要刪「30 天前的文章」得自己算出日期字串。之後如果常用可以加 `--older-than-days N` 這種語法糖,MVP 先不做。
 - **第四輪:`remove-batch --keyword` 對這次修正之前就存在的舊資料,標籤比對不到中文**(`tags` 欄位還是舊的 `ensure_ascii=True` 跳脫格式),標題/內容欄位不受影響。見上面「決策」段落的詳細說明,要嘛重新 `add`/`feeds sync`,要嘛之後寫一次性 migration script。
@@ -169,13 +193,13 @@ CLAUDE.md「未來規劃方向」列的:
 - 自動化處理的其餘部分(關聯筆記推薦、去重複——自動打標籤這一小塊已經做完)
 - Web UI 或 Raycast/Alfred 整合(**Streamlit 網頁介面已經做完基本版,而且使用者本人已經用過**,如果要往「多人使用」或更精緻互動的方向,可能要考慮換成正式 web app)
 
-Hybrid search(關鍵字 + 語意搜尋並用)**第九輪已經做完**,細節見上面「已經做完的東西」跟「中途做的決策」兩節。
+Hybrid search(關鍵字 + 語意搜尋並用)**第九輪已經做完**,文件分類**第十輪已經做完**,細節都在上面「已經做完的東西」跟「中途做的決策」兩節。
 
-使用者說這些方向都想做,已經照優先順序做完 `remove` → 「更聰明的 dedupe」+「清空知識庫指令」→ 「自動打標籤(殼)」→ 「RSS ingestion」→ 「Streamlit 網頁介面」→「一鍵啟動」→ 「feed 訂閱清單(CLI)」→ 「feed 訂閱清單補進網頁介面」→ 「search/ask 顯示時間 + remove-batch 批次刪除(CLI)」→ 「remove-batch 補進網頁介面」(第五輪)→ 「訂閱真實 RSS 來源」(第六輪)→ 「翻譯成繁體中文 + 時間戳記改 UTC+8」(第七輪)→ 「hybrid search」(第九輪)。
+使用者說這些方向都想做,已經照優先順序做完 `remove` → 「更聰明的 dedupe」+「清空知識庫指令」→ 「自動打標籤(殼)」→ 「RSS ingestion」→ 「Streamlit 網頁介面」→「一鍵啟動」→ 「feed 訂閱清單(CLI)」→ 「feed 訂閱清單補進網頁介面」→ 「search/ask 顯示時間 + remove-batch 批次刪除(CLI)」→ 「remove-batch 補進網頁介面」(第五輪)→ 「訂閱真實 RSS 來源」(第六輪)→ 「翻譯成繁體中文 + 時間戳記改 UTC+8」(第七輪)→ 「hybrid search」(第九輪)→ 「訂閱財經 RSS 來源 + 文件分類」(第十輪)。
 
 ## 下一輪要做的事:還沒決定,先問使用者
 
-跟第八輪不一樣,**這次沒有已經拍板的下一步**——hybrid search 做完之後還沒
+跟第八輪不一樣,**這次沒有已經拍板的下一步**——文件分類做完之後還沒
 跟使用者討論過接下來要做什麼,下一輪一開始應該先問,不要自己選一個候選就
 直接動工。
 
@@ -186,15 +210,17 @@ Hybrid search(關鍵字 + 語意搜尋並用)**第九輪已經做完**,細節見
 - 網頁介面的細節打磨(新增後自動跳轉、分頁、更明確的操作回饋)——使用者已經開始實際用網頁介面,這些會變得比較有感。
 - **`feeds sync` 排程自動化**:目前要手動打指令才會同步,如果之後想要「每天自動同步一次」,得另外接排程機制(cron/Windows工作排程器),CLAUDE.md 的 MVP 階段明確說「自動化排程」先不做,是刻意排除的範圍,提之前先確認使用者真的想跨出 MVP 範圍。
 - **舊資料的 `tags` 欄位 migration**:把這次修正之前存進去的 ASCII 跳脫格式標籤轉成 `ensure_ascii=False` 格式,讓 `remove-batch --keyword` 對舊文件的標籤比對也能生效。不急,先重新 `add`/`feeds sync` 一次也能解決,只是比較手動。
+- **分類下拉選單/自動建議**:見上面「已知的粗糙邊界」,網頁介面批次設定分類的地方目前是純文字輸入,容易手滑打錯字;可以考慮換成下拉選單 + 新增選項的組合。
+- **更多財經 RSS 來源**:這輪只挑了 3 個(經濟日報/自由時報財經版/Yahoo股市),討論候選時還看過商周財富網(`https://www.businessweekly.com.tw/feedsec.aspx?feedid=10&channelid=15`,已驗證可用但使用者這輪沒選),之後如果想再加可以直接用。
 
 ## 交接檢查清單(接手時建議做的事)
 
-1. `git log --oneline` 確認目前在哪個 commit,`git status --short --branch` 確認有沒有沒 commit 的東西、有沒有 `ahead`/`behind` origin。**這次交接時,hybrid search(第九輪)的程式碼還沒 commit**——`git status` 應該看得到 9 個修改過的檔案(`pyproject.toml`、`config.py`、`processing/tagging.py`、`retrieval/search.py`、`storage/__init__.py`/`sqlite_store.py`/`store.py`、`tests/retrieval/test_search.py`、`tests/storage/test_sqlite_store.py`)+ 3 個新檔案(`processing/text.py`、`retrieval/keyword_search.py`、`tests/retrieval/test_keyword_search.py`),視交接當下狀態而定,先看一下有沒有人接手 commit 過。
-2. **知識庫裡現在有真實資料**:第六輪幫使用者訂閱了三個真實 RSS 來源(The Verge、Hacker News、Simon Willison's Weblog),`data/second_brain.db`/`data/chroma/` 不是空的測試資料,手動測試/除錯時要小心別誤刪這些真實訂閱或文章(用 `remove-batch`/`clear` 之前務必先 `list`/`feeds list` 確認)。
-3. **這台機器沒有設 `ANTHROPIC_API_KEY`**:`ask`/`translate` 都還沒被使用者實際跑過,`second-brain translate` 目前只驗證過「沒 key 時清楚報錯退出」這條路徑,還沒驗證過真的翻譯品質。使用者設定 key 之後,建議提醒他跑一次 `second-brain translate` 幫現有 40 幾篇文章補翻譯,並抽查幾篇品質。
-4. `./.venv/Scripts/python.exe -m pytest -q` 應該要 88 個全過(第九輪加了 5 個新測試,83 → 88)、~5 秒內跑完
+1. `git log --oneline` 確認目前在哪個 commit,`git status --short --branch` 確認有沒有沒 commit 的東西、有沒有 `ahead`/`behind` origin。**這次交接時,文件分類(第十輪)的程式碼還沒 commit**(hybrid search 第九輪已經 commit 進 `f44d231`)——`git status` 應該看得到約 15 個修改過的檔案(`models.py`、`ingestion/pipeline.py`、`interface/cli.py`、`interface/web.py`、`retrieval/ask.py`/`keyword_search.py`/`search.py`、`storage/__init__.py`/`sqlite_store.py`/`store.py`,加上對應的測試檔案),沒有新檔案(這輪都是改既有檔案,不像上一輪加了新模組),視交接當下狀態而定,先看一下有沒有人接手 commit 過。`.claude/launch.json` 也改了(加 `autoPort: true`),這個不算功能程式碼但也還沒 commit。
+2. **知識庫裡現在有真實資料,而且這輪新加了三個財經來源**:除了第六輪訂閱的三個科技來源(The Verge、Hacker News、Simon Willison's Weblog),第十輪又訂閱了經濟日報/自由時報財經版/Yahoo股市,`feeds list` 現在應該看到 6 個訂閱、`list` 應該看到 90 篇左右的文件,全部都已經分類完畢(科技/財經/新聞三類,沒有未分類的)。手動測試/除錯時要小心別誤刪這些真實訂閱或文章(用 `remove-batch`/`clear`/`set-category` 之前務必先 `list`/`feeds list` 確認)。
+3. **這台機器沒有設 `ANTHROPIC_API_KEY`**:`ask`/`translate` 都還沒被使用者實際跑過,`second-brain translate` 目前只驗證過「沒 key 時清楚報錯退出」這條路徑,還沒驗證過真的翻譯品質。使用者設定 key 之後,建議提醒他跑一次 `second-brain translate` 幫現有文章補翻譯,並抽查幾篇品質。
+4. `./.venv/Scripts/python.exe -m pytest -q` 應該要 106 個全過(第十輪加了 18 個新測試,88 → 106)、~6 秒內跑完
 5. 如果要手動測 `add`/`search`,第一次跑會下載 ~90MB 的 embedding 模型,需要網路;jieba 第一次執行也會在本機建 prefix dict 快取(不用連網,純本機運算,第一次會慢個零點幾秒)
-6. `pyproject.toml` 這輪陸續加了 `jieba>=0.42`、`feedparser>=6.0`、`streamlit>=1.38`(在 `[project.optional-dependencies].ui`,不在預設 `dev` 裡)、**`rank_bm25>=0.2`(第九輪,在預設 `dependencies` 裡,不是 optional)**,如果是全新環境要記得重新 `pip install -e ".[dev]"`(CLI/測試)跟 `pip install -e ".[ui]"`(網頁介面)
-7. 如果要手動測 `add-feed`/`feeds add` 又不想真的連網,`feedparser.parse()` 吃本機檔案路徑或原始 XML 字串都可以;這輪也已經用多個真實網址(BBC News、The Verge、Hacker News、Simon Willison's Weblog)驗證過連網路徑沒問題
+6. `pyproject.toml` 這輪陸續加了 `jieba>=0.42`、`feedparser>=6.0`、`streamlit>=1.38`(在 `[project.optional-dependencies].ui`,不在預設 `dev` 裡)、`rank_bm25>=0.2`(第九輪,在預設 `dependencies` 裡,不是 optional),**第十輪沒有再加新依賴**,如果是全新環境要記得重新 `pip install -e ".[dev]"`(CLI/測試)跟 `pip install -e ".[ui]"`(網頁介面)
+7. 如果要手動測 `add-feed`/`feeds add` 又不想真的連網,`feedparser.parse()` 吃本機檔案路徑或原始 XML 字串都可以;歷輪已經用多個真實網址(BBC News、The Verge、Hacker News、Simon Willison's Weblog、經濟日報、自由時報財經版、Yahoo股市)驗證過連網路徑沒問題
 8. 開始功能表有一個「Second Brain」捷徑指向 [run_web.bat](run_web.bat)(這輪在使用者機器上建的,不在 git 裡,取代了原本刪掉的桌面捷徑);如果要驗證雙擊啟動的行為,記得先刪掉 `%USERPROFILE%\.streamlit\credentials.toml` 模擬全新機器,不然「歡迎訊息卡住」那個 bug 修好了沒有根本測不出來
-9. 如果要用瀏覽器自動化測 Streamlit 網頁介面,見「中途做的決策」裡記錄的多筆工具限制筆記(text_input 優先用 `computer` 的 triple_click+type,checkbox 要用 JS 點 `label` 元素,`expander` 沒設 `expanded=True` 會每次 rerun 自動收合,長時間執行的 process 會快取住舊模組、遇到剛加的名稱 `ImportError` 先重啟 process)
+9. 如果要用瀏覽器自動化測 Streamlit 網頁介面,見「中途做的決策」裡記錄的多筆工具限制筆記(text_input 優先用 `computer` 的 triple_click+type,checkbox 要用 JS 點 `label` 元素,`expander` 沒設 `expanded=True` 會每次 rerun 自動收合,長時間執行的 process 會快取住舊模組、遇到剛加的名稱 `ImportError` 先重啟 process)。**第十輪新增一筆**:如果 `.claude/launch.json` 設定的 `second-brain-web` 這個 server name 剛好被另一個對話 session 佔用同一個 port(8501),`preview_start` 會報衝突——這個設定檔已經加了 `"autoPort": true`,harness 會自動換一個空 port,不用特地處理,只是要注意 `preview_start` 回傳的實際 port 號會變。

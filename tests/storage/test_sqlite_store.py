@@ -179,6 +179,48 @@ def test_insert_document_persists_translated_content(tmp_path: Path) -> None:
     assert fetched.translated_content == "你好"
 
 
+def test_insert_document_persists_category(tmp_path: Path) -> None:
+    db_path = tmp_path / "test.db"
+    document = Document(id="doc-1", source_path="/tmp/note.md", title="note", content="hello", category="財經")
+
+    sqlite_store.insert_document(document, [], db_path=db_path)
+
+    fetched = sqlite_store.get_document("doc-1", db_path=db_path)
+    assert fetched.category == "財經"
+
+
+def test_update_document_category_changes_existing_document(tmp_path: Path) -> None:
+    db_path = tmp_path / "test.db"
+    document = Document(id="doc-1", source_path="/tmp/note.md", title="note", content="hello")
+    sqlite_store.insert_document(document, [], db_path=db_path)
+
+    sqlite_store.update_document_category("doc-1", "科技", db_path=db_path)
+
+    assert sqlite_store.get_document("doc-1", db_path=db_path).category == "科技"
+
+
+def test_bulk_update_category_returns_affected_row_count(tmp_path: Path) -> None:
+    db_path = tmp_path / "test.db"
+    sqlite_store.insert_document(
+        Document(id="doc-a", source_path="/tmp/a.md", title="A", content="a"), [], db_path=db_path
+    )
+    sqlite_store.insert_document(
+        Document(id="doc-b", source_path="/tmp/b.md", title="B", content="b"), [], db_path=db_path
+    )
+
+    updated_count = sqlite_store.bulk_update_category(["doc-a", "doc-b", "doc-missing"], "新聞", db_path=db_path)
+
+    assert updated_count == 2
+    assert sqlite_store.get_document("doc-a", db_path=db_path).category == "新聞"
+    assert sqlite_store.get_document("doc-b", db_path=db_path).category == "新聞"
+
+
+def test_bulk_update_category_returns_zero_for_empty_id_list(tmp_path: Path) -> None:
+    db_path = tmp_path / "test.db"
+
+    assert sqlite_store.bulk_update_category([], "新聞", db_path=db_path) == 0
+
+
 def test_list_documents_reports_has_translation(tmp_path: Path) -> None:
     db_path = tmp_path / "test.db"
     translated = Document(
@@ -221,7 +263,7 @@ def test_update_translated_content(tmp_path: Path) -> None:
 
 def test_insert_feed_subscription_round_trips(tmp_path: Path) -> None:
     db_path = tmp_path / "test.db"
-    feed = FeedSubscription(id="feed-1", url="https://example.com/rss.xml", name="Example Feed")
+    feed = FeedSubscription(id="feed-1", url="https://example.com/rss.xml", name="Example Feed", category="財經")
 
     sqlite_store.insert_feed_subscription(feed, db_path=db_path)
     fetched = sqlite_store.get_feed_subscription_by_url("https://example.com/rss.xml", db_path=db_path)
@@ -230,6 +272,18 @@ def test_insert_feed_subscription_round_trips(tmp_path: Path) -> None:
     assert fetched.id == "feed-1"
     assert fetched.name == "Example Feed"
     assert fetched.last_synced_at is None
+    assert fetched.category == "財經"
+
+
+def test_update_feed_category_changes_existing_subscription(tmp_path: Path) -> None:
+    db_path = tmp_path / "test.db"
+    feed = FeedSubscription(id="feed-1", url="https://example.com/rss.xml", name="Example Feed")
+    sqlite_store.insert_feed_subscription(feed, db_path=db_path)
+
+    sqlite_store.update_feed_category("https://example.com/rss.xml", "科技", db_path=db_path)
+
+    fetched = sqlite_store.get_feed_subscription_by_url("https://example.com/rss.xml", db_path=db_path)
+    assert fetched.category == "科技"
 
 
 def test_get_feed_subscription_by_url_returns_none_when_missing(tmp_path: Path) -> None:
