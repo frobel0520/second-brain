@@ -24,8 +24,8 @@ class AskResult:
     sources: list[SearchResult] = field(default_factory=list)
 
 
-def ask(query: str, top_k: int = 5) -> AskResult:
-    results = search(query, top_k=top_k)
+def ask(query: str, top_k: int = 5, category: str | None = None) -> AskResult:
+    results = search(query, top_k=top_k, category=category)
 
     if not results:
         return AskResult(answer="知識庫裡目前沒有相關的筆記可以回答這個問題。")

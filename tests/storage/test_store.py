@@ -145,10 +145,22 @@ def test_mark_feed_synced_sets_last_synced_at() -> None:
 
 
 def _document_with_created_at(
-    doc_id: str, source_path: str, title: str, created_at: datetime, content: str = "內容", tags: list[str] | None = None
+    doc_id: str,
+    source_path: str,
+    title: str,
+    created_at: datetime,
+    content: str = "內容",
+    tags: list[str] | None = None,
+    category: str | None = None,
 ) -> tuple[Document, list[Chunk]]:
     document = Document(
-        id=doc_id, source_path=source_path, title=title, content=content, created_at=created_at, tags=tags or []
+        id=doc_id,
+        source_path=source_path,
+        title=title,
+        content=content,
+        created_at=created_at,
+        tags=tags or [],
+        category=category,
     )
     chunks = [Chunk(id=f"{doc_id}-chunk", document_id=doc_id, content=content, chunk_index=0, embedding=[0.1, 0.2])]
     return document, chunks
@@ -229,6 +241,88 @@ def test_find_documents_combines_filters_with_or() -> None:
     matches = store.find_documents(created_before=datetime(2026, 2, 1, tzinfo=timezone.utc), keyword="貓咪")
 
     assert {m.id for m in matches} == {"doc-date", "doc-keyword"}
+
+
+def test_find_documents_filters_by_category_alone() -> None:
+    tech_doc, tech_chunks = _document_with_created_at(
+        "doc-tech", "/tmp/tech.md", "科技筆記", datetime(2026, 1, 1, tzinfo=timezone.utc), category="科技"
+    )
+    finance_doc, finance_chunks = _document_with_created_at(
+        "doc-finance", "/tmp/finance.md", "財經筆記", datetime(2026, 1, 1, tzinfo=timezone.utc), category="財經"
+    )
+    store.save_document(tech_doc, tech_chunks)
+    store.save_document(finance_doc, finance_chunks)
+
+    matches = store.find_documents(category="財經")
+
+    assert [m.id for m in matches] == ["doc-finance"]
+
+
+def test_find_documents_combines_category_with_other_filter_using_and() -> None:
+    matching, matching_chunks = _document_with_created_at(
+        "doc-match", "/tmp/match.md", "符合", datetime(2026, 1, 1, tzinfo=timezone.utc), content="貓咪", category="財經"
+    )
+    wrong_category, wrong_category_chunks = _document_with_created_at(
+        "doc-wrong-category", "/tmp/wrong.md", "分類不符", datetime(2026, 1, 1, tzinfo=timezone.utc),
+        content="貓咪", category="科技",
+    )
+    store.save_document(matching, matching_chunks)
+    store.save_document(wrong_category, wrong_category_chunks)
+
+    matches = store.find_documents(keyword="貓咪", category="財經")
+
+    assert [m.id for m in matches] == ["doc-match"]
+
+
+def test_list_categories_returns_distinct_non_null_categories() -> None:
+    doc_a, chunks_a = _document_with_created_at(
+        "doc-a", "/tmp/a.md", "A", datetime(2026, 1, 1, tzinfo=timezone.utc), category="財經"
+    )
+    doc_b, chunks_b = _document_with_created_at(
+        "doc-b", "/tmp/b.md", "B", datetime(2026, 1, 1, tzinfo=timezone.utc), category="財經"
+    )
+    doc_c, chunks_c = _document_with_created_at(
+        "doc-c", "/tmp/c.md", "C", datetime(2026, 1, 1, tzinfo=timezone.utc), category=None
+    )
+    store.save_document(doc_a, chunks_a)
+    store.save_document(doc_b, chunks_b)
+    store.save_document(doc_c, chunks_c)
+
+    assert store.list_categories() == ["財經"]
+
+
+def test_set_document_categories_updates_matching_documents() -> None:
+    doc_a, chunks_a = _document_with_created_at("doc-a", "/tmp/a.md", "A", datetime(2026, 1, 1, tzinfo=timezone.utc))
+    doc_b, chunks_b = _document_with_created_at("doc-b", "/tmp/b.md", "B", datetime(2026, 1, 1, tzinfo=timezone.utc))
+    store.save_document(doc_a, chunks_a)
+    store.save_document(doc_b, chunks_b)
+
+    updated_count = store.set_document_categories(["doc-a"], "新聞")
+
+    assert updated_count == 1
+    matches = store.find_documents(category="新聞")
+    assert [m.id for m in matches] == ["doc-a"]
+
+
+def test_subscribe_feed_persists_category() -> None:
+    feed = store.subscribe_feed("https://example.com/rss.xml", "Example Feed", category="財經")
+
+    assert feed.category == "財經"
+    assert store.list_feed_subscriptions()[0].category == "財經"
+
+
+def test_update_feed_category_updates_existing_subscription() -> None:
+    store.subscribe_feed("https://example.com/rss.xml", "Example Feed")
+
+    updated = store.update_feed_category("https://example.com/rss.xml", "科技")
+
+    assert updated is not None
+    assert updated.category == "科技"
+    assert store.list_feed_subscriptions()[0].category == "科技"
+
+
+def test_update_feed_category_returns_none_when_not_found() -> None:
+    assert store.update_feed_category("https://nope.example.com", "科技") is None
 
 
 def test_remove_documents_deletes_by_id_and_returns_titles() -> None:

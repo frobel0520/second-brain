@@ -16,6 +16,7 @@ class Document:
     metadata: dict = field(default_factory=dict)
     tags: list[str] = field(default_factory=list)
     translated_content: str | None = None
+    category: str | None = None
 
 
 @dataclass
@@ -44,6 +45,7 @@ class DocumentSummary:
     chunk_count: int
     tags: list[str] = field(default_factory=list)
     has_translation: bool = False
+    category: str | None = None
 
 
 @dataclass
@@ -53,3 +55,4 @@ class FeedSubscription:
     name: str
     added_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     last_synced_at: datetime | None = None
+    category: str | None = None

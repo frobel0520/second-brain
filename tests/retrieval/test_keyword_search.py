@@ -3,6 +3,7 @@ from pathlib import Path
 import pytest
 
 from second_brain.models import Chunk, Document
+from second_brain.storage import list_all_chunks
 from second_brain.retrieval.keyword_search import keyword_scores
 from second_brain.storage import sqlite_store, store, vector_store
 
@@ -38,3 +39,15 @@ def test_keyword_scores_ranks_exact_term_match_higher() -> None:
 
     assert scores["doc-match-chunk"] > scores["doc-nomatch-1-chunk"]
     assert scores["doc-match-chunk"] > scores["doc-nomatch-2-chunk"]
+
+
+def test_keyword_scores_only_covers_given_chunk_subset() -> None:
+    """呼叫端(hybrid search 限定分類時)可以傳入一個 chunk 子集合,結果應該
+    只包含子集合裡的 chunk id,子集合以外的 chunk 完全不列入語料/分數。"""
+    _save("doc-a", "/tmp/a.md", "A", "sqlite-utils 套件更新。")
+    _save("doc-b", "/tmp/b.md", "B", "sqlite-utils 也在這篇提到。")
+    subset = [chunk for chunk in list_all_chunks() if chunk.id == "doc-a-chunk"]
+
+    scores = keyword_scores("sqlite-utils", chunks=subset)
+
+    assert set(scores) == {"doc-a-chunk"}
