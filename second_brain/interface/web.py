@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import tempfile
+from datetime import datetime, time, timezone
 from pathlib import Path
 
 import anthropic
@@ -20,9 +21,11 @@ from second_brain.processing.tagging import get_tagging_provider
 from second_brain.retrieval.ask import ask as run_ask
 from second_brain.retrieval.search import search as run_search
 from second_brain.storage import (
+    find_documents,
     list_documents,
     list_feed_subscriptions,
     remove_document,
+    remove_documents,
     subscribe_feed,
     unsubscribe_feed,
 )
@@ -46,6 +49,9 @@ tab_browse, tab_search, tab_ask, tab_add, tab_feeds = st.tabs(
 )
 
 with tab_browse:
+    if "batch_delete_message" in st.session_state:
+        st.success(st.session_state.pop("batch_delete_message"))
+
     documents = list_documents()
 
     if not documents:
@@ -67,6 +73,62 @@ with tab_browse:
                     if st.button("刪除", key=f"remove-{document.id}"):
                         remove_document(document.source_path)
                         st.rerun()
+
+    st.divider()
+
+    st.subheader("批次刪除")
+    st.caption(
+        "依日期範圍、關鍵字、來源批次刪除,符合任一個條件就會列入(OR);"
+        "日期範圍是例外,兩個一起給的話彼此是 AND,定義一段區間。至少要給一個條件。"
+    )
+
+    col_after, col_before = st.columns(2)
+    with col_after:
+        batch_after = st.date_input("加入時間之後(含)", value=None, key="batch-after")
+    with col_before:
+        batch_before = st.date_input("加入時間之前(含)", value=None, key="batch-before")
+
+    batch_keyword = st.text_input("關鍵字(標題/內容/標籤)", key="batch-keyword")
+    batch_source = st.text_input("來源路徑或網址包含", key="batch-source")
+
+    if st.button("預覽符合的文件"):
+        if not any([batch_after, batch_before, batch_keyword, batch_source]):
+            st.warning("至少要給一個篩選條件。")
+            st.session_state["batch_matches"] = []
+        else:
+            after_dt = (
+                datetime.combine(batch_after, time.min).replace(tzinfo=timezone.utc)
+                if batch_after
+                else None
+            )
+            before_dt = (
+                datetime.combine(batch_before, time(23, 59, 59, 999999)).replace(tzinfo=timezone.utc)
+                if batch_before
+                else None
+            )
+            st.session_state["batch_matches"] = find_documents(
+                created_after=after_dt,
+                created_before=before_dt,
+                keyword=batch_keyword or None,
+                source=batch_source or None,
+            )
+
+    batch_matches = st.session_state.get("batch_matches", [])
+
+    if batch_matches:
+        st.write(f"符合條件的文件共 {len(batch_matches)} 筆:")
+        for match in batch_matches:
+            st.write(f"- {match.created_at:%Y-%m-%d %H:%M}  {match.title}  ({match.source_path})")
+
+        confirmed = st.checkbox(
+            f"我確認要刪除這 {len(batch_matches)} 筆文件,這個動作無法復原。", key="batch-confirm"
+        )
+        if confirmed and st.button("刪除這些文件", type="primary"):
+            removed_titles = remove_documents([match.id for match in batch_matches])
+            st.session_state["batch_delete_message"] = f"已刪除 {len(removed_titles)} 筆文件。"
+            st.session_state["batch_matches"] = []
+            st.session_state["batch-confirm"] = False
+            st.rerun()
 
 with tab_search:
     query = st.text_input("搜尋知識庫", placeholder="想搜尋的內容")

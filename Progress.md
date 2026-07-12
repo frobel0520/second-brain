@@ -4,35 +4,38 @@
 使用方式看 [README.md](README.md),規劃看 [CLAUDE.md](CLAUDE.md)。這份只記錄
 「現在做到哪、為什麼這樣做、接下來大概要做什麼」,每次做完一個階段性任務就更新。
 
-最後更新:2026-07-12(第四輪)
+最後更新:2026-07-12(第五輪)
 
 ## 現況一句話
 
 CLAUDE.md 的 MVP(`add` / `search` / `ask`)已經做完,另外多做了 `list`、
 `remove`、`clear`、`add-feed`(RSS/Atom ingestion)、自動打標籤、Streamlit
-網頁介面、一鍵啟動、feed 訂閱清單(CLI + 網頁介面兩邊都有,第二、三輪做的,
-分別 commit 進 `302939b`/`e12d091`)。**這輪(第四輪)做了兩件事**,是使用者
-直接提的需求,沒有先問方向:(1) 讓 `search`/`ask` 的結果顯示時間戳記——問清楚
-後發現使用者要的其實只是「顯示」,`Document.created_at` 本來就有,不用改
-schema;(2) 新增 `second-brain remove-batch`,依日期範圍/關鍵字/來源批次
-刪除文件,三個條件是使用者要求的 **OR**(符合任一個就刪,不是同時符合)。
-過程中抓到一個真的會壞掉的 bug:**`documents.tags`/`metadata` 兩個 JSON
-欄位存的時候用預設 `json.dumps()`,中文字會被轉成 `\uXXXX` 跳脫,導致
-`remove-batch --keyword` 用 SQL `LIKE` 比對標籤時完全比對不到中文標籤**——
-已修成 `ensure_ascii=False`,但**這次修正之前就存在的舊資料(包含使用者
-真實的 BBC 文章)`tags` 欄位還是舊格式,要重新 `add`/`feeds sync` 過一次
-才會用新格式存**,見下面決策說明。71 個測試全過(新增 6 個 `find_documents`/
-`remove_documents` 測試,`ask` 的既有測試也跟著回傳型別改動更新)。手動在
-CLI 跟瀏覽器裡都逐步驗證過(`remove-batch` 的 OR 邏輯、日期範圍、確認流程、
-`--yes`、`search`/`ask` 顯示時間都實際跑過一次)。**這輪的變更還沒 commit**,
-下一個對話開始時記得先確認要不要 commit 掉。**使用者這輪一開始說要先去前端
-檢查上一輪(第三輪)做的東西沒問題就 push,還沒收到「檢查完畢」的回覆就先
-提了這兩個新需求**,下一個對話開始時要留意「push」這件事有沒有還懸著。
+網頁介面、一鍵啟動、feed 訂閱清單(CLI + 網頁介面)、`search`/`ask` 顯示時間、
+`remove-batch` 批次刪除(CLI 版,第四輪做的)。**這輪(第五輪)把批次刪除也
+補進網頁介面**:使用者去前端檢查完(確認第三輪做的訂閱清單沒問題),回報
+「找不到批次刪除的地方,只看到每篇文章右上角的單筆刪除按鈕」,問過使用者
+要不要加、選了要加,在「瀏覽」分頁下方加了一個批次刪除區塊(日期範圍/關鍵字/
+來源篩選 → 預覽符合項目 → 勾選確認 → 刪除),底層直接呼叫跟 CLI 版
+`remove-batch` 同一組 `find_documents()`/`remove_documents()`。過程中踩到
+三個瀏覽器自動化的坑(不是產品程式碼的 bug,但**有一個真的產品 bug**混在
+裡面,見下面決策說明):(1) 一開始把批次刪除包在 `st.expander()` 裡,但
+`st.expander()` 沒有 `expanded=True` 的話,每次欄位失焦觸發 rerun 都會自動
+收合,導致填表單填到一半整個區塊自己關起來——**這是真的會發生的產品 bug,
+已修好**(拿掉 expander,固定顯示);(2) 這次 `form_input` 工具沒辦法讓
+Streamlit 的 `text_input` 真的收到新值(DOM 值有改,但 Python 端讀到空字串),
+要改用 `computer` 的 `triple_click` 選取 + `type` 真的鍵盤輸入;(3) Streamlit
+的 `st.checkbox` 用 react-aria 做無障礙處理,真正的 `<input type="checkbox">`
+是視覺隱藏的(`clip-path` 裁掉),直接點擊/`.click()` 都不會觸發,要點擊外層
+`<label>` 才會正確委派事件。71 個測試全過(這次沒加新測試,重用第四輪已測過的
+`find_documents()`/`remove_documents()`,靠瀏覽器手動跑完整流程驗證,含真的
+刪除兩篇測試文件成功)。**第四輪的東西已經 commit(`5669b07`)且 push 上
+`origin/master` 了**(`d72a479..5669b07`),**這輪(第五輪)的網頁批次刪除
+還沒 commit**,下一個對話開始時記得先確認要不要 commit + push。
 
 ## 環境
 
 - Windows,Python 3.14.4,`.venv/` 在專案根目錄(已裝好所有依賴,含 torch/sentence-transformers/chromadb/anthropic/jieba/feedparser/streamlit)
-- **這輪發現 repo 其實已經有 git remote**(`origin` → `https://github.com/frobel0520/second-brain.git`),上一輪筆記寫的「沒有 git remote,只有本機 repo」已經過時,是使用者自己後來加的,沒有回報。**以後開始交接檢查時,`git remote -v` 也要順便看一下**,不要只信筆記。
+- **git remote 已確認存在**(`origin` → `https://github.com/frobel0520/second-brain.git`),第四輪筆記已經記過,第四輪的東西已經 push 上去了,交接時 `git status --short --branch` 順便看一下是否 `ahead`/`behind`。
 - 常用指令:
   ```bash
   ./.venv/Scripts/python.exe -m pytest -q                    # 跑測試,~4 秒,不用真的 embedding 模型
@@ -55,7 +58,7 @@ CLI 跟瀏覽器裡都逐步驗證過(`remove-batch` 的 OR 邏輯、日期範�
 9. `second-brain feeds list` — 列出訂閱清單:名稱、網址、上次同步時間(`尚未同步` 或時間戳)。
 10. `second-brain feeds remove <feed_url>` — 從訂閱清單移除來源(刪 `feeds` 表那一列),**不會**動到已經加入知識庫的文章——訂閱清單只是「要不要繼續追蹤」的紀錄,跟文章本身是否留在知識庫是兩件事,要連文章一起刪要另外用 `second-brain remove <文章網址>`。
 11. `second-brain feeds sync [--limit/-n N]` — 同步訂閱清單裡的**所有**來源:對每個訂閱依序呼叫 `sync_feed_subscription()`,更新 `last_synced_at`,印出每個來源「新增 X 篇、更新 Y 篇、略過 Z 篇」。**單一來源抓取/解析失敗不會擋住其他來源**——`pipeline.sync_feed_subscription()` 把例外包進 `FeedSyncResult.error`,不會往外拋,`feeds sync` 對每個來源印出「同步失敗:{原因}」後繼續處理下一個。
-12. `second-brain remove-batch [--after DATE] [--before DATE] [--keyword K] [--source S] [--yes/-y]` — **第四輪新加**。依日期範圍/關鍵字/來源批次刪除文件,三個條件是**使用者要求的 OR**(符合任一個就刪,不是同時符合),`--after`/`--before` 兩個一起給是例外、彼此是 AND(定義一段區間)。**至少要給一個條件**,不然要用 `clear`。刪除前會列出符合的文件並要求確認(跟 `clear` 同樣的安全機制,`--yes` 可跳過)。日期格式是 `YYYY-MM-DD`,格式錯會被 typer 擋下來,不會靜默失敗。底層是 `storage/sqlite_store.py:find_documents()`,用動態組出的 `WHERE (cond1) OR (cond2) OR (cond3)` 查詢,`storage.remove_documents(ids)` 批次刪。
+12. `second-brain remove-batch [--after DATE] [--before DATE] [--keyword K] [--source S] [--yes/-y]` — 依日期範圍/關鍵字/來源批次刪除文件,三個條件是**使用者要求的 OR**(符合任一個就刪,不是同時符合),`--after`/`--before` 兩個一起給是例外、彼此是 AND(定義一段區間)。**至少要給一個條件**,不然要用 `clear`。刪除前會列出符合的文件並要求確認(跟 `clear` 同樣的安全機制,`--yes` 可跳過)。日期格式是 `YYYY-MM-DD`,格式錯會被 typer 擋下來,不會靜默失敗。底層是 `storage/sqlite_store.py:find_documents()`,用動態組出的 `WHERE (cond1) OR (cond2) OR (cond3)` 查詢,`storage.remove_documents(ids)` 批次刪。**第五輪在網頁介面「瀏覽」分頁下方加了對應的批次刪除區塊**,同一套底層函式,UX 是「篩選條件 → 預覽符合的文件 → 勾選確認 → 刪除這些文件」四步驟,細節見下面決策說明。
 
 **自動打標籤**(是「自動化處理」這個大方向的第一小步):`add`/`add-feed` 讀進文件後會呼叫 `processing/tagging.py` 的 `get_tagging_provider().tag(document)`,把結果存進 `Document.tags`(SQLite `documents.tags` 欄位,JSON 字串)。`list`/`add`/`add-feed` 的輸出訊息都會顯示標籤。`TaggingProvider` 是抽象介面(跟 `EmbeddingProvider` 同樣的設計慣例),目前唯一實作是 `KeywordFrequencyTaggingProvider`:用 jieba 斷詞(中文)+ 保留原樣的英文單字,濾掉停用詞,取詞頻最高的前 `config.MAX_TAGS`(預設 5)個當標籤。之後要換成 LLM 分類或規則式邏輯,只要換掉 `get_tagging_provider()` 回傳的實作。
 
@@ -116,6 +119,9 @@ CLI 跟瀏覽器裡都逐步驗證過(`remove-batch` 的 OR 邏輯、日期範�
 - **第四輪:`remove-batch` 的 OR 邏輯是使用者明確要求的,不是我預設的選擇**:實作前有問使用者「日期/關鍵字/來源同時給的話要 AND 還是 OR」,使用者選 OR(符合任一個就刪)。這跟我原本設想的「AND 比較不容易誤刪」直覺不一樣,**這是使用者確認過的設計,不是應該被「修正」的東西**,以後如果要改這個行為要重新跟使用者確認,不要自己覺得「AND 比較安全」就默默改掉。`--after`/`--before` 兩個一起給是唯一的例外(彼此是 AND,定義一段日期區間),因為單獨拆成兩個 OR 條件會沒有意義(任何日期都會符合「早於某天」或「晚於某天」其中之一)。
 - **第四輪:`remove-batch` 沿用 `clear` 的安全機制(列出項目 + 互動確認 + `--yes` 跳過),沒有另外問使用者**:因為這是既有專案慣例(`clear` 已經這樣做),批次刪除又比單筆 `remove` 危險,套用同一個模式是最小驚訝的做法,不需要每次遇到「這個操作有點危險」就重新問一次要怎麼做確認機制。
 - **第四輪:`remove-batch` 至少要求一個篩選條件,不給任何條件會被擋下來並導去 `clear`**:如果讓「什麼條件都不給」的 `remove-batch` 等同「刪除全部」,會跟 `clear` 語意重疊、而且更容易因為忘記打條件而誤刪全部知識庫(`clear` 至少指令名稱就在警告你「這是清空」,`remove-batch` 沒打條件不會有這種直覺提示)。
+- **第五輪(真的會壞掉的 bug):`st.expander()` 沒設 `expanded=True` 的話,每次欄位失焦觸發 rerun 就會自動收合**:一開始把批次刪除的表單包在 `st.expander("批次刪除")` 裡(想法是預設收起來、不要一直佔畫面)。手動測試填表單時發現:填完「關鍵字」欄位、游標移到「來源」欄位觸發 blur → Streamlit rerun → **`st.expander()` 預設是每次重跑都重新算 collapsed 狀態,不會記住使用者剛剛手動展開過**,整個區塊自己關起來,使用者填到一半東西就消失,完全無法正常使用。**這是真的會發生的 bug,不是預防性修改**(用 Claude Browser pane 實測到表單「自己關起來」)。**修法**:拿掉 `expander`,批次刪除區塊直接固定顯示在「瀏覽」分頁最下面(用 `st.divider()` + `st.subheader()` 分隔,跟頁面其他區塊風格一致)。**教訓**:Streamlit 的 `expander`/類似「可摺疊」元件,只要底下有任何會觸發 rerun 的互動元件(text_input 的 blur、date_input 的選擇……),沒有額外用 session_state 記住展開狀態的話,預設行為就是每次 rerun 都摺疊回去——這個專案目前唯一一處用到 `expander` 就踩到這個坑,以後這個專案裡應該避免在會員互動的表單外面包 `expander`,除非額外處理展開狀態的持久化。
+- **第五輪:`form_input` 工具這次對 Streamlit 的 `text_input` 沒有效果,DOM 值改了但 Python 端讀不到**:這輪重新測試批次刪除的關鍵字欄位時,先用 `form_input` 設值,`javascript_tool` 直接查 DOM 確認值真的寫進去了(`el.value` 印出來是對的),但點擊「預覽符合的文件」後 Streamlit 端印出「至少要給一個篩選條件」——代表 Python 端的 `st.text_input()` 讀到的還是空字串,`form_input` 的原生 setter 沒有觸發 Streamlit React 元件真正監聽的事件。**跟上一輪(第三輪)的結論不完全一樣**:第三輪筆記寫「`form_input` + 點別的欄位觸發 blur」有效,這輪同樣的組合卻沒用——**不確定原因是不同元件實例的差異還是环境本身不穩定,先記錄「這個工具在這個專案的 Streamlit 元件上不可靠」這個結論,不要再假設它一定有效**。**最後真的有效的作法**:改用 `computer` 工具的 `triple_click`(選取欄位既有文字)+ `type`(真的鍵盤輸入,不是 DOM setter)+ 按 `Enter` 或點別的地方觸發 blur。**以後在這個專案測 Streamlit 文字輸入,優先用 `computer` 的 triple_click+type,不要優先嘗試 `form_input`**,可以省掉來回除錯的時間。
+- **第五輪:Streamlit 的 `st.checkbox` 用 react-aria 做無障礙處理,真正的 `<input type="checkbox">` 被 `clip-path` 視覺隱藏,直接點擊/`.click()` 都不會觸發**:用 `read_page` 拿到的 checkbox ref 定位去點,或用 `javascript_tool` 對 input 元素本身呼叫 `.click()`,DOM 的 `checked` 屬性都沒有變化,Python 端的 `st.checkbox()` 也讀不到勾選狀態。查了 DOM 結構才發現真正的 `<input>` 包在一個 `clip-path: inset(50%)` 的 `<span>` 裡(視覺上完全隱藏,只留給螢幕閱讀器用),畫面上看到的方框圖示是另一個 `aria-hidden` 的裝飾元素,不是可互動的 DOM 節點。**有效的作法**:用 `javascript_tool` 找到 checkbox 的 `closest('label')`,對這個 `<label>` 呼叫 `.click()`——HTML 原生的 `<label>` 點擊會自動委派給它包住的表單元件並觸發正常的 `click`/`change` 事件,這是瀏覽器原生行為,不受 react-aria 的自訂事件處理影響。**以後在這個專案測 Streamlit checkbox,直接跳過點 input/point 座標這條路,用 JS 點 `label` 元素**。
 
 ## 已知的粗糙邊界(還沒處理,不算 bug,是刻意先跳過)
 
@@ -133,7 +139,7 @@ CLI 跟瀏覽器裡都逐步驗證過(`remove-batch` 的 OR 邏輯、日期範�
 - **網頁介面的「新增筆記」完成後不會自動導去「瀏覽」分頁**,使用者要自己點過去才看得到剛加的東西(見上面決策說明)。
 - **網頁介面目前沒有針對大量文件的分頁/捲動優化**,跟 CLI 的 `list` 一樣是先求能動,文件一多畫面會變長。
 - **`streamlit` 是獨立的 optional dependency**(`pyproject.toml` 的 `[project.optional-dependencies].ui`),裝 `.[dev]` 不會自動裝到,要另外 `pip install -e ".[ui]"` 或 `.[dev,ui]`。
-- **第四輪:`remove-batch` 只有 CLI,網頁介面沒有對應的批次刪除 UI**,跟第二輪的 `feeds` 系列指令一開始一樣,先在 CLI 做完;批次刪除本身又比訂閱清單更危險(會真的刪掉文件),要不要加進網頁介面、加的話要怎麼做確認機制,建議先問使用者再做,不要自己假設。
+- **第五輪:網頁介面批次刪除的「預覽符合的文件」結果存在 `st.session_state`,切換分頁或做其他操作不會自動清掉**,如果使用者預覽完之後跑去別的分頁刪了某篇筆記、又切回來直接勾確認刪除,實際刪除時是照「當初預覽的那份清單」執行(`remove_documents()` 用的是預覽當下記下的 id 列表),已經被刪掉的 id 會被 `remove_documents()` 靜默略過(`sqlite_store.get_document(id)` 找不到就跳過,不會報錯),不會導致誤刪別的東西,但如果知識庫在預覽之後有新增符合條件的文件,不會自動出現在待刪清單裡,要重新按一次「預覽符合的文件」才會抓到最新結果。
 - **第四輪:`remove-batch` 的 `--after`/`--before` 只支援 `YYYY-MM-DD` 絕對日期,沒有「N 天前」這種相對日期的簡寫**,要刪「30 天前的文章」得自己算出日期字串。之後如果常用可以加 `--older-than-days N` 這種語法糖,MVP 先不做。
 - **第四輪:`remove-batch --keyword` 對這次修正之前就存在的舊資料,標籤比對不到中文**(`tags` 欄位還是舊的 `ensure_ascii=True` 跳脫格式),標題/內容欄位不受影響。見上面「決策」段落的詳細說明,要嘛重新 `add`/`feeds sync`,要嘛之後寫一次性 migration script。
 
@@ -145,7 +151,7 @@ CLAUDE.md「未來規劃方向」列的:
 - 自動化處理的其餘部分(關聯筆記推薦、去重複——自動打標籤這一小塊已經做完)
 - Web UI 或 Raycast/Alfred 整合(**Streamlit 網頁介面已經做完基本版,而且使用者本人已經用過**,如果要往「多人使用」或更精緻互動的方向,可能要考慮換成正式 web app)
 
-使用者說這些方向都想做,已經照優先順序做完 `remove` → 「更聰明的 dedupe」+「清空知識庫指令」→ 「自動打標籤(殼)」→ 「RSS ingestion」→ 「Streamlit 網頁介面」→「一鍵啟動」→ 「feed 訂閱清單(CLI)」→ 「feed 訂閱清單補進網頁介面」→ **「search/ask 顯示時間 + remove-batch 批次刪除」(第四輪,使用者直接提的,沒有先選方向)**。**下一個對話開始時,建議問使用者接下來要做哪個**,不要自己選,除非使用者又直接提了具體需求。**hybrid search 還沒做,連續兩輪都排在候選最前面,但使用者這兩輪都選了別的**,不代表使用者不想做,只是還沒排到,不要因為連續沒被選就自己降低它的排序。
+使用者說這些方向都想做,已經照優先順序做完 `remove` → 「更聰明的 dedupe」+「清空知識庫指令」→ 「自動打標籤(殼)」→ 「RSS ingestion」→ 「Streamlit 網頁介面」→「一鍵啟動」→ 「feed 訂閱清單(CLI)」→ 「feed 訂閱清單補進網頁介面」→ 「search/ask 顯示時間 + remove-batch 批次刪除(CLI)」→ **「remove-batch 補進網頁介面」(第五輪,使用者去前端檢查後回報缺口,問過要不要加、選了要加)**。**下一個對話開始時,建議問使用者接下來要做哪個**,不要自己選,除非使用者又直接提了具體需求。**hybrid search 還沒做,連續三輪都排在候選最前面,但使用者連續三輪都選了別的**,不代表使用者不想做,只是還沒排到,不要因為連續沒被選就自己降低它的排序,但也可以考慮下次直接主動問「要不要做 hybrid search 了」而不是每次都列一長串候選。
 
 候選(不代表優先順序):
 - **Hybrid search**:目前 `search`/`ask` 只有語意搜尋(向量相似度),對精確詞彙查詢(人名、專有名詞)通常不如關鍵字搜尋準。加關鍵字 + 語意並用,會直接讓所有既有筆記的搜尋品質提升,不像新 ingestion 來源那樣只影響新加的內容。
@@ -153,13 +159,12 @@ CLAUDE.md「未來規劃方向」列的:
 - **YouTube 頻道 RSS**:對話中討論過,使用者問過但決定「先不做」。要注意的是 YouTube 頻道 RSS 只有標題+短描述,**沒有逐字稿**,能做的頂多是「新影片書籤」,不是「影片內容知識庫」;如果之後想做後者,得另外接字幕/逐字稿的來源,不是單純的 RSS ingestion 可以解決的,下次有人提這個要先講清楚這個限制。
 - 關聯筆記推薦、去重複。
 - 網頁介面的細節打磨(新增後自動跳轉、分頁、更明確的操作回饋)——使用者已經開始實際用網頁介面,這些會變得比較有感。
-- **網頁介面補上 `remove-batch` 的批次刪除 UI**:CLI 這輪已經做完,見「已知的粗糙邊界」。
 - **`feeds sync` 排程自動化**:目前要手動打指令才會同步,如果之後想要「每天自動同步一次」,得另外接排程機制(cron/Windows工作排程器),CLAUDE.md 的 MVP 階段明確說「自動化排程」先不做,是刻意排除的範圍,提之前先確認使用者真的想跨出 MVP 範圍。
 - **舊資料的 `tags` 欄位 migration**:把這次修正之前存進去的 ASCII 跳脫格式標籤轉成 `ensure_ascii=False` 格式,讓 `remove-batch --keyword` 對舊文件的標籤比對也能生效。不急,先重新 `add`/`feeds sync` 一次也能解決,只是比較手動。
 
 ## 交接檢查清單(接手時建議做的事)
 
-1. `git log --oneline` 確認目前在哪個 commit,`git status` 確認有沒有沒 commit 的東西(這次交接時,**第四輪:search/ask 顯示時間 + `remove-batch` + tags 中文編碼 bug 修復,這批預期還沒 commit**;第二、三輪的 feed 訂閱清單 CLI/網頁介面已經分別進了 `302939b`/`e12d091`)。**另外 `git remote -v` 也確認一下**——這輪發現 repo 其實已經接了 `origin`(`github.com/frobel0520/second-brain.git`),上一輪筆記寫錯了,不要只信筆記。
+1. `git log --oneline` 確認目前在哪個 commit,`git status --short --branch` 確認有沒有沒 commit 的東西、有沒有 `ahead`/`behind` origin(這次交接時,**第五輪:網頁介面批次刪除,這批預期還沒 commit/push**;第四輪的 search/ask 顯示時間 + `remove-batch` CLI + tags 編碼修復已經 commit 進 `5669b07` 並 push 上 `origin/master` 了,第二、三輪的 feed 訂閱清單分別是 `302939b`/`e12d091`)。
 2. `./.venv/Scripts/python.exe -m pytest -q` 應該要 71 個全過、~5 秒內跑完
 3. 如果要手動測 `add`/`search`,第一次跑會下載 ~90MB 的 embedding 模型,需要網路;jieba 第一次執行也會在本機建 prefix dict 快取(不用連網,純本機運算,第一次會慢個零點幾秒)
 4. 如果要手動測 `ask`,需要使用者提供 `ANTHROPIC_API_KEY`(這台機器目前沒設,使用者已經知道怎麼設定,是自己的事,不用主動催)
