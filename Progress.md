@@ -4,7 +4,7 @@
 使用方式看 [README.md](README.md),規劃看 [CLAUDE.md](CLAUDE.md)。這份只記錄
 「現在做到哪、為什麼這樣做、接下來大概要做什麼」,每次做完一個階段性任務就更新。
 
-最後更新:2026-07-12(第十一輪,再訂閱三個台灣科技 RSS 來源)
+最後更新:2026-07-12(第十二輪,退訂三個英文科技來源、改訂三個中文新聞來源)
 
 ## 現況一句話
 
@@ -13,8 +13,18 @@ CLAUDE.md 的 MVP 加上這些都做完了:`list`/`remove`/`clear`/`add-feed`/�
 顯示時間/`remove-batch` 批次刪除(CLI+網頁)/UTC+8 時間顯示/翻譯成繁體中文
 (第七輪)/hybrid search(第九輪,已 commit 進 `f44d231`)/文件分類(第十輪,
 `科技`/`新聞`/`財經` 三個分類,`list`/`search`/`ask`/瀏覽頁面都能按分類篩選,
-已 commit 進 `f0ef6d6` 並 push)。**第十輪跟第十一輪的程式碼都已經 commit
-並 push 上 `origin/master` 了,交接時工作目錄應該是乾淨的。**
+已 commit 進 `f0ef6d6` 並 push)。**第十輪、第十一輪的程式碼都已經 commit
+並 push 上 `origin/master` 了;第十二輪沒有改程式碼,交接時工作目錄應該
+是乾淨的(除非 `Progress.md` 這次更新還沒 commit)。**
+
+**第十二輪:使用者決定把知識庫換成全部中文內容**——退訂 The Verge/Hacker
+News/Simon Willison's Weblog 這三個英文科技來源、**並刪除這三個來源已經拉
+進來的所有文章**(使用者明確要求連文章一起刪,不是只退訂),改訂閱三個中文
+新聞類來源:**中央社(國際)**、**BBC中文網(繁體)**、**ETtoday(即時新聞)**。
+細節見下面「訂閱異動」專節。知識庫現在有 **9 個訂閱來源**(科技 3:iThome/
+TechNews 科技新報/DIGITIMES,財經 3:經濟日報/自由時報財經版/Yahoo股市,
+新聞 3:中央社(國際)/BBC中文網/ETtoday),**109 篇文件**,分類統計是新聞
+32、財經 47、科技 30,全部分類完畢、沒有遺漏。
 
 **第十一輪沒有改程式碼**,做了三件事:(1) 使用者回報網頁介面噴
 `ImportError: cannot import name 'list_categories'`——這是**已知問題,不是
@@ -42,10 +52,8 @@ RSS,列出來讓使用者選,使用者選**全部訂閱**:**iThome**
 要先確認他們是不是真的還有 RSS,不要直接假設網址存在。
 
 **第十輪的內容(訂閱三個財經 RSS 來源 + 做完文件分類功能)沒有變動**,細節
-還是看下面各專節,這裡不重複。知識庫現在有 **9 個訂閱來源**(The Verge/
-Hacker News/Simon Willison's Weblog/iThome/TechNews 科技新報/DIGITIMES 這
-6 個是科技類,經濟日報/自由時報財經版/Yahoo股市這 3 個是財經類),**120 篇
-文件**,分類統計是科技 63、財經 47、新聞 10,全部分類完畢、沒有遺漏。
+還是看下面各專節,這裡不重複。**訂閱來源清單本身已經被第十二輪異動過**,
+上面「第十二輪」那段的數字才是目前正確的現況,這裡不重複列。
 
 **第八輪沒有改程式碼,做了兩件事**:(1) 使用者回饋第七輪的翻譯功能「其實好像
 還好」,實際閱讀習慣是「想細看的文章再點進去用 Google 自動翻譯」,不需要整個
@@ -111,8 +119,15 @@ Hacker News/Simon Willison's Weblog/iThome/TechNews 科技新報/DIGITIMES 這
   - **手動驗證時真的用 Streamlit 網頁介面走過一次**:啟動 `streamlit run` 開瀏覽器確認分類篩選下拉選單、文件的 `📁 分類` 標籤、訂閱清單的分類顯示跟編輯欄位都正常渲染,沒有停留在「程式碼看起來對」就結束。**這輪剛好撞到另一個對話 session 也在跑同一個 `second-brain-web` 開發伺服器(同一個 `port: 8501`)**,`.claude/launch.json` 加了 `"autoPort": true` 解決衝突(讓 harness 自動換一個空的 port),這個設定檔的改動之後也不用改回去,不影響其他人正常使用。
 
 **財經 RSS 訂閱與分類回填(第十輪)**:使用者想加財經類的來源,先用 `WebSearch`/瀏覽器找了幾個台灣財經媒體的 RSS 網址、逐一用 `feedparser.parse()` 實際驗證過抓得到文章(不是憑空猜網址),列出候選讓使用者選,使用者選了 3 個:**經濟日報**(`https://money.udn.com/rssfeed/news/1001/5588`)、**自由時報財經版**(`https://news.ltn.com.tw/rss/business.xml`)、**Yahoo股市**(`https://tw.stock.yahoo.com/rss?category=news`),都用 `feeds add` 訂閱並各抓了 10 篇。
-  - **分類回填的完整過程**:先用 `feeds set-category` 把 6 個訂閱來源都設好分類(The Verge/HN/Simon Willison → 科技,新訂的 3 個財經來源 → 財經),再跑一次 `feeds sync` 讓**當下還在 feed 回傳範圍內**的文章重新蓋上分類。**這樣沒辦法涵蓋所有舊文件**:(1) 有幾篇比較早期加入、已經滾出 feed 目前回傳範圍的文章(經濟日報/自由時報財經版/Yahoo股市各有幾篇、Simon Willison 有 3 篇連結到外部網站的 linkblog 項目)沒被這次 resync 碰到,依然是未分類;(2) 知識庫裡另外有 10 篇 BBC 中文網文章,是很久以前用**一次性** `add-feed`(不是 `feeds add` 訂閱)加進來的,根本沒有對應的 `feeds` 表紀錄可以依循,「依訂閱來源固定分類」這個規則對它們完全不適用。**兩種情況都用 `second-brain set-category <分類> --source <網域關鍵字> --yes` 手動掃過去補齊**(例如 `--source bbc.com` 補 BBC 文章的「新聞」分類,`--source money.udn.com`/`ec.ltn.com.tw`/`yahoo.com` 補財經來源滾出視窗的舊文章)。**這個過程中犯了一次操作失誤**:掃 `yahoo.com` 網域補財經分類之後,又手滑對 `tw.news.yahoo.com` 這個子網域跑了一次「科技」分類(原意是想確認還有沒有漏網之魚,結果打錯分類值),把已經正確設成財經的幾篇文章覆蓋成科技,發現後立刻用同一個指令重新掃一次改回財經修正。**教訓**:`set-category`/`remove-batch` 這類批次操作在下指令前,即使有 `--yes` 想跳過確認,也應該先不加 `--yes` 看一下預覽的分類清單再決定,尤其是要覆蓋「已經設定過」的欄位時,打錯值不會有任何警告(跟刪除不一樣,刪除至少東西會消失比較容易發現,分類設定錯了不會有明顯徵兆,可能過一陣子才會發現)。
+  - **分類回填的完整過程**:先用 `feeds set-category` 把 6 個訂閱來源都設好分類(The Verge/HN/Simon Willison → 科技,新訂的 3 個財經來源 → 財經),再跑一次 `feeds sync` 讓**當下還在 feed 回傳範圍內**的文章重新蓋上分類。**這樣沒辦法涵蓋所有舊文件**:(1) 有幾篇比較早期加入、已經滾出 feed 目前回傳範圍的文章沒被這次 resync 碰到,依然是未分類;(2) 知識庫裡另外有 10 篇 BBC 中文網文章,是很久以前用**一次性** `add-feed`(不是 `feeds add` 訂閱)加進來的,根本沒有對應的 `feeds` 表紀錄可以依循,「依訂閱來源固定分類」這個規則對它們完全不適用。**兩種情況都用 `second-brain set-category <分類> --source <網域關鍵字> --yes` 手動掃過去補齊**(例如 `--source bbc.com` 補 BBC 文章的「新聞」分類,`--source money.udn.com`/`ec.ltn.com.tw`/`yahoo.com` 補財經來源滾出視窗的舊文章)。**這個過程中犯了一次操作失誤**:掃 `yahoo.com` 網域補財經分類之後,又手滑對 `tw.news.yahoo.com` 這個子網域跑了一次「科技」分類(原意是想確認還有沒有漏網之魚,結果打錯分類值),把已經正確設成財經的幾篇文章覆蓋成科技,發現後立刻用同一個指令重新掃一次改回財經修正。**教訓**:`set-category`/`remove-batch` 這類批次操作在下指令前,即使有 `--yes` 想跳過確認,也應該先不加 `--yes` 看一下預覽的分類清單再決定,尤其是要覆蓋「已經設定過」的欄位時,打錯值不會有任何警告(跟刪除不一樣,刪除至少東西會消失比較容易發現,分類設定錯了不會有明顯徵兆,可能過一陣子才會發現)。
   - **回填後最終結果**:90 篇文件全部分類完畢,科技 33 篇、財經 47 篇、新聞 10 篇,用 `sqlite_store.list_documents()` 直接查過 `category is None` 的數量確認是 0,不是只看 CLI 輸出的表面訊息。
+  - **這輪(第十輪)筆記原本寫錯一件事,第十二輪退訂 Hacker News 時才發現、順便訂正**:原本以為「3 篇連結到外部網站(goeteia.dev/fabiensanglard.net/arxiv.org)的項目」是 Simon Willison's Weblog 的 linkblog 貼文,**其實是 Hacker News 的文章**——HN 的 RSS 本來就是連到原始文章網址(不是連到 news.ycombinator.com 討論頁),所以看起來很像某個部落格的「引用連結」貼文格式,兩種來源長得很像,光看 URL 本身容易搞混。第十二輪要精準區分「這篇文章到底是不是 HN 的」時,用了一個可靠的判斷法:HN 的 `<description>` 永遠是「Comments」這幾個字(見上面第六輪那個 bug 修法),觸發 `_MIN_CONTENT_LENGTH` fallback 後 `document.content` 會**完全等於** `document.title`;而 Simon Willison 的部落格文章(即使是短的 linkblog 貼文,例如「Quoting X」)`content` 都會有實際內容,不會跟 `title`一模一樣。用這個「`content == title`」訊號一查,原本以為的 3 篇 Simon Willison 文章其實全部符合 HN 的訊號,加上其他 10 篇也是同樣訊號,總共 13 篇——這才是真正的 HN 文章數量。**教訓**:這個專案的 `Document` 沒有存「這篇文章是從哪個訂閱來源進來的」這個關聯(`category` 是分類本身,不是來源本身的記錄),之後如果又要做「精準區分某篇文章到底來自哪個 feed」這種操作,不能只看 URL 網域,對於「RSS 連到外部網站」的來源(HN 是最典型的例子)要用內容特徵(例如 `content == title` 這個 HN 特有的訊號)去反推,不要憑 URL 長相用猜的。
+
+**訂閱異動:退訂三個英文科技來源、改訂三個中文新聞來源(第十二輪)**:使用者決定把知識庫換成全部中文內容。
+  - **退訂 + 刪除既有文章**:`second-brain feeds remove <url>` 退訂 The Verge/Hacker News/Simon Willison's Weblog 三個訂閱(這步驟本身不影響已存文件,是既有行為);接著使用者明確要求連文章也要刪掉,不是只退訂,所以再用 `remove-batch --source theverge.com --yes` 刪掉 10 篇 Verge 文章、`remove-batch --source simonwillison.net --yes` 刪掉 10 篇 Simon Willison 文章。**Hacker News 沒辦法用 `--source` 網域比對**,因為 HN 的文章連結是原始文章網址(散布在十幾個不同網域),不像其他來源網址網域統一——用上面決策說明提到的「`content == title`」訊號抓出精確的 13 篇 HN 文章 id,逐一用 `second-brain remove <url>` 刪除。
+  - **新訂閱直接在 `feeds add --category 新聞` 一次到位**:**中央社(國際)**(`https://feeds.feedburner.com/rsscna/intworld`)、**BBC中文網**(`http://feeds.bbci.co.uk/zhongwen/trad/rss.xml`)、**ETtoday**(`https://feeds.feedburner.com/ettoday/realtime`),都是先用 `WebSearch` + 瀏覽器找候選、逐一用 `feedparser.parse()` 實測過才列進候選給使用者選,不是憑空猜網址。**BBC中文網這次變成正式訂閱**:知識庫裡本來就有 10 篇 BBC 中文網文章(很久以前用一次性 `add-feed` 加進來、被歸類「新聞」),`feeds add` 訂閱同一個 feed 之後,`sync_feed_subscription()` 的 dedupe 邏輯(比對 `source_path`)自動把這 10 篇的分類重新蓋上(還是「新聞」,值沒變但走的是同一套機制)、再加 2 篇新文章,不需要額外處理就自然接上了。
+  - **查過但沒有列進候選的中文新聞來源**:**公視新聞**(`https://about.pts.org.tw/rss/XML/newsfeed.xml`)網址存在、頁面上有列出來,但實際用 `feedparser`/`urllib` 連線會噴 `SSL: CERTIFICATE_VERIFY_FAILED`(伺服器憑證缺 Subject Key Identifier,是對方網站憑證設定有問題,不是我們這邊的問題),沒有辦法用,之後如果又有人想訂公視新聞,先確認對方憑證問題有沒有修好,不要假設能直接接上。
+  - **最終結果**:9 個訂閱來源(科技 3、財經 3、新聞 3),109 篇文件,分類統計新聞 32、財經 47、科技 30,全部分類完畢。
 
 **RSS/Atom ingestion**(CLAUDE.md「更多 ingestion 來源」的第一個):`ingestion/rss_loader.py` 的 `load_feed(feed_url, limit=None) -> list[Document]`,用 `feedparser` 解析 feed,每個 entry 轉成一個 `Document`:
   - `source_path` 用文章的 `link`(dedupe/`remove` 都靠這個欄位比對,語意上等同本機檔案的路徑)
@@ -201,6 +216,7 @@ Hacker News/Simon Willison's Weblog/iThome/TechNews 科技新報/DIGITIMES 這
 - **第十輪:`feeds set-category` 不會回頭改已經存在的文件**,只影響之後同步進來的新文章;舊文件要嘛靠下次同步時該文章剛好還在 feed 回傳範圍內順便更新,要嘛要另外用 `second-brain set-category` 手動批次改——這是刻意的設計(理由見上面「文件分類」決策說明),但代表**改一個訂閱來源的分類,不會馬上讓瀏覽頁面上這個來源的舊文章分類跟著變**,如果沒讀過決策說明容易誤以為是 bug。
 - **第十輪:RSS 來源分類回填只能靠「文章還在 feed 目前回傳範圍內」這個條件**,滾出範圍的舊文章不會在 resync 時自動被蓋上分類,需要額外用 `set-category --source <網域>` 手動掃。目前知識庫已經全部手動掃過一輪、沒有遺漏,但**之後如果又有新的一次性 `add-feed`(不是 `feeds add` 訂閱)加進來的文章**,一樣不會有分類,需要意識到這件事、記得手動補。
 - **第十輪:網頁介面「批次設定分類」的分類輸入是純文字框,沒有下拉選單提示既有分類**(瀏覽頁面的篩選跟搜尋/問答分頁的限定分類都是下拉選單,只有這個批次設定的地方是純文字輸入),想套用既有分類名稱要自己記得打一樣的字,容易手滑打錯(這輪的分類回填在 CLI 上就真的手滑打錯過一次,細節見上面決策說明)。之後如果要改進,可以考慮換成下拉選單 + 「新增分類」的組合輸入。
+- **第十二輪:`Document` 沒有存「這篇文章是從哪個訂閱來源進來的」這個關聯**,只有分類(`category`)是存在文件上的固定值,分類本身不等於來源記錄(例如同一個分類底下可以有好幾個不同來源)。這代表「只刪掉某一個特定訂閱來源拉進來的文章」這種操作,沒辦法直接查詢,只能用 `source_path` 網域比對(適用大部分來源)或內容特徵(適用像 Hacker News 這種連到外部網站、網域五花八門的來源,細節見上面決策說明的「`content == title`」訊號)去反推,是手動的偵探工作,不是一個指令就能做到。如果之後這種「整批移除單一訂閱來源的文章」的需求變得常見,可以考慮加一個 `documents.source_feed_url` 欄位在 ingest 時記錄,現在先不做(YAGNI,目前只遇到過一次這種需求)。
 - **第五輪:網頁介面批次刪除的「預覽符合的文件」結果存在 `st.session_state`,切換分頁或做其他操作不會自動清掉**,如果使用者預覽完之後跑去別的分頁刪了某篇筆記、又切回來直接勾確認刪除,實際刪除時是照「當初預覽的那份清單」執行(`remove_documents()` 用的是預覽當下記下的 id 列表),已經被刪掉的 id 會被 `remove_documents()` 靜默略過(`sqlite_store.get_document(id)` 找不到就跳過,不會報錯),不會導致誤刪別的東西,但如果知識庫在預覽之後有新增符合條件的文件,不會自動出現在待刪清單裡,要重新按一次「預覽符合的文件」才會抓到最新結果。
 - **第四輪:`remove-batch` 的 `--after`/`--before` 只支援 `YYYY-MM-DD` 絕對日期,沒有「N 天前」這種相對日期的簡寫**,要刪「30 天前的文章」得自己算出日期字串。之後如果常用可以加 `--older-than-days N` 這種語法糖,MVP 先不做。
 - **第四輪:`remove-batch --keyword` 對這次修正之前就存在的舊資料,標籤比對不到中文**(`tags` 欄位還是舊的 `ensure_ascii=True` 跳脫格式),標題/內容欄位不受影響。見上面「決策」段落的詳細說明,要嘛重新 `add`/`feeds sync`,要嘛之後寫一次性 migration script。
@@ -222,7 +238,7 @@ CLAUDE.md「未來規劃方向」列的:
 
 Hybrid search(關鍵字 + 語意搜尋並用)**第九輪已經做完**,文件分類**第十輪已經做完**,細節都在上面「已經做完的東西」跟「中途做的決策」兩節。
 
-使用者說這些方向都想做,已經照優先順序做完 `remove` → 「更聰明的 dedupe」+「清空知識庫指令」→ 「自動打標籤(殼)」→ 「RSS ingestion」→ 「Streamlit 網頁介面」→「一鍵啟動」→ 「feed 訂閱清單(CLI)」→ 「feed 訂閱清單補進網頁介面」→ 「search/ask 顯示時間 + remove-batch 批次刪除(CLI)」→ 「remove-batch 補進網頁介面」(第五輪)→ 「訂閱真實 RSS 來源」(第六輪)→ 「翻譯成繁體中文 + 時間戳記改 UTC+8」(第七輪)→ 「hybrid search」(第九輪)→ 「訂閱財經 RSS 來源 + 文件分類」(第十輪)。
+使用者說這些方向都想做,已經照優先順序做完 `remove` → 「更聰明的 dedupe」+「清空知識庫指令」→ 「自動打標籤(殼)」→ 「RSS ingestion」→ 「Streamlit 網頁介面」→「一鍵啟動」→ 「feed 訂閱清單(CLI)」→ 「feed 訂閱清單補進網頁介面」→ 「search/ask 顯示時間 + remove-batch 批次刪除(CLI)」→ 「remove-batch 補進網頁介面」(第五輪)→ 「訂閱真實 RSS 來源」(第六輪)→ 「翻譯成繁體中文 + 時間戳記改 UTC+8」(第七輪)→ 「hybrid search」(第九輪)→ 「訂閱財經 RSS 來源 + 文件分類」(第十輪)→ 「訂閱中文科技 RSS 來源」(第十一輪)→ 「退訂英文科技來源、改訂中文新聞來源」(第十二輪)。
 
 ## 下一輪要做的事:還沒決定,先問使用者
 
@@ -242,12 +258,12 @@ Hybrid search(關鍵字 + 語意搜尋並用)**第九輪已經做完**,文件分
 
 ## 交接檢查清單(接手時建議做的事)
 
-1. `git log --oneline` 確認目前在哪個 commit,`git status --short --branch` 確認有沒有沒 commit 的東西、有沒有 `ahead`/`behind` origin。**這次交接時,第十輪(文件分類)跟第九輪(hybrid search)都已經 commit(`f44d231`/`f0ef6d6`)並 push 上 `origin/master`,工作目錄應該是乾淨的**——第十一輪沒有改任何程式碼,只有 `Progress.md` 可能還沒 commit,視交接當下狀態而定先看一下。`.claude/launch.json` 有改過(加 `autoPort: true`),但這個檔案本來就在 `.gitignore` 裡,不會出現在 `git status`,不用理它。
-2. **知識庫裡現在有真實資料,而且陸續訂閱了 9 個真實 RSS 來源**:科技類有 The Verge、Hacker News、Simon Willison's Weblog(第六輪)+ iThome、TechNews 科技新報、DIGITIMES(第十一輪);財經類有經濟日報、自由時報財經版、Yahoo股市(第十輪)。`feeds list` 應該看到這 9 個訂閱、`list` 應該看到 120 篇左右的文件,全部都已經分類完畢(科技/財經/新聞三類,沒有未分類的)。手動測試/除錯時要小心別誤刪這些真實訂閱或文章(用 `remove-batch`/`clear`/`set-category` 之前務必先 `list`/`feeds list` 確認)。
+1. `git log --oneline` 確認目前在哪個 commit,`git status --short --branch` 確認有沒有沒 commit 的東西、有沒有 `ahead`/`behind` origin。**這次交接時,第十輪(文件分類)跟第九輪(hybrid search)都已經 commit(`f44d231`/`f0ef6d6`)並 push 上 `origin/master`,工作目錄應該是乾淨的**——第十一輪、第十二輪都沒有改任何程式碼(只有訂閱來源異動,資料本身在 `data/` 底下、`.gitignore` 掉了,不會進 git),只有 `Progress.md` 可能還沒 commit,視交接當下狀態而定先看一下。`.claude/launch.json` 有改過(加 `autoPort: true`),但這個檔案本來就在 `.gitignore` 裡,不會出現在 `git status`,不用理它。
+2. **知識庫裡現在有真實資料,訂閱來源這輪(第十二輪)大換血過**:科技類是 iThome、TechNews 科技新報、DIGITIMES(第十一輪訂的,原本的 The Verge/Hacker News/Simon Willison's Weblog 這三個英文來源已經在第十二輪退訂並刪除所有文章);財經類是經濟日報、自由時報財經版、Yahoo股市(第十輪);新聞類是中央社(國際)、BBC中文網、ETtoday(第十二輪)。`feeds list` 應該看到這 9 個訂閱、`list` 應該看到 109 篇左右的文件,全部都已經分類完畢(科技/財經/新聞三類,沒有未分類的)。手動測試/除錯時要小心別誤刪這些真實訂閱或文章(用 `remove-batch`/`clear`/`set-category` 之前務必先 `list`/`feeds list` 確認)。
 3. **這台機器沒有設 `ANTHROPIC_API_KEY`**:`ask`/`translate` 都還沒被使用者實際跑過,`second-brain translate` 目前只驗證過「沒 key 時清楚報錯退出」這條路徑,還沒驗證過真的翻譯品質。使用者設定 key 之後,建議提醒他跑一次 `second-brain translate` 幫現有文章補翻譯,並抽查幾篇品質。
 4. `./.venv/Scripts/python.exe -m pytest -q` 應該要 106 個全過(第十輪加了 18 個新測試,88 → 106)、~6 秒內跑完
 5. 如果要手動測 `add`/`search`,第一次跑會下載 ~90MB 的 embedding 模型,需要網路;jieba 第一次執行也會在本機建 prefix dict 快取(不用連網,純本機運算,第一次會慢個零點幾秒)
 6. `pyproject.toml` 這輪陸續加了 `jieba>=0.42`、`feedparser>=6.0`、`streamlit>=1.38`(在 `[project.optional-dependencies].ui`,不在預設 `dev` 裡)、`rank_bm25>=0.2`(第九輪,在預設 `dependencies` 裡,不是 optional),**第十輪沒有再加新依賴**,如果是全新環境要記得重新 `pip install -e ".[dev]"`(CLI/測試)跟 `pip install -e ".[ui]"`(網頁介面)
-7. 如果要手動測 `add-feed`/`feeds add` 又不想真的連網,`feedparser.parse()` 吃本機檔案路徑或原始 XML 字串都可以;歷輪已經用多個真實網址(BBC News、The Verge、Hacker News、Simon Willison's Weblog、經濟日報、自由時報財經版、Yahoo股市)驗證過連網路徑沒問題
+7. 如果要手動測 `add-feed`/`feeds add` 又不想真的連網,`feedparser.parse()` 吃本機檔案路徑或原始 XML 字串都可以;歷輪已經用多個真實網址(BBC中文網、經濟日報、自由時報財經版、Yahoo股市、iThome、TechNews 科技新報、DIGITIMES、中央社、ETtoday,以及已經退訂的 The Verge/Hacker News/Simon Willison's Weblog)驗證過連網路徑沒問題
 8. 開始功能表有一個「Second Brain」捷徑指向 [run_web.bat](run_web.bat)(這輪在使用者機器上建的,不在 git 裡,取代了原本刪掉的桌面捷徑);如果要驗證雙擊啟動的行為,記得先刪掉 `%USERPROFILE%\.streamlit\credentials.toml` 模擬全新機器,不然「歡迎訊息卡住」那個 bug 修好了沒有根本測不出來
 9. 如果要用瀏覽器自動化測 Streamlit 網頁介面,見「中途做的決策」裡記錄的多筆工具限制筆記(text_input 優先用 `computer` 的 triple_click+type,checkbox 要用 JS 點 `label` 元素,`expander` 沒設 `expanded=True` 會每次 rerun 自動收合,長時間執行的 process 會快取住舊模組、遇到剛加的名稱 `ImportError` 先重啟 process)。**第十輪新增一筆**:如果 `.claude/launch.json` 設定的 `second-brain-web` 這個 server name 剛好被另一個對話 session 佔用同一個 port(8501),`preview_start` 會報衝突——這個設定檔已經加了 `"autoPort": true`,harness 會自動換一個空 port,不用特地處理,只是要注意 `preview_start` 回傳的實際 port 號會變。
