@@ -41,7 +41,10 @@ def _isolated_storage(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_ask_returns_placeholder_when_nothing_stored() -> None:
-    assert ask_module.ask("有什麼筆記?") == "知識庫裡目前沒有相關的筆記可以回答這個問題。"
+    result = ask_module.ask("有什麼筆記?")
+
+    assert result.answer == "知識庫裡目前沒有相關的筆記可以回答這個問題。"
+    assert result.sources == []
 
 
 def test_ask_builds_context_and_returns_model_answer(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -55,4 +58,8 @@ def test_ask_builds_context_and_returns_model_answer(monkeypatch: pytest.MonkeyP
 
     monkeypatch.setattr(ask_module.anthropic, "Anthropic", lambda: _FakeAnthropicClient("這是回答。"))
 
-    assert ask_module.ask("測試問題") == "這是回答。"
+    result = ask_module.ask("測試問題")
+
+    assert result.answer == "這是回答。"
+    assert len(result.sources) == 1
+    assert result.sources[0].document.id == "doc-1"

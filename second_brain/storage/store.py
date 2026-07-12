@@ -9,6 +9,17 @@ from second_brain.models import Chunk, Document, DocumentSummary, FeedSubscripti
 from second_brain.storage import sqlite_store, vector_store
 
 
+def find_documents(
+    created_after: datetime | None = None,
+    created_before: datetime | None = None,
+    keyword: str | None = None,
+    source: str | None = None,
+) -> list[DocumentSummary]:
+    return sqlite_store.find_documents(
+        created_after=created_after, created_before=created_before, keyword=keyword, source=source
+    )
+
+
 def save_document(document: Document, chunks: list[Chunk]) -> None:
     sqlite_store.insert_document(document, chunks)
     vector_store.add_chunks(chunks)
@@ -54,6 +65,18 @@ def remove_document(source_path: str) -> str | None:
 
     _delete_document(existing)
     return existing.title
+
+
+def remove_documents(document_ids: list[str]) -> list[str]:
+    """依 id 批次刪除文件(sqlite + chroma)。回傳實際被刪除的文件標題列表。"""
+    removed_titles = []
+    for document_id in document_ids:
+        document = sqlite_store.get_document(document_id)
+        if document is None:
+            continue
+        _delete_document(document)
+        removed_titles.append(document.title)
+    return removed_titles
 
 
 def clear_all() -> int:

@@ -59,8 +59,8 @@ def insert_document(document: Document, chunks: list[Chunk], db_path: Path | Non
                     document.title,
                     document.content,
                     document.created_at.isoformat(),
-                    json.dumps(document.metadata),
-                    json.dumps(document.tags),
+                    json.dumps(document.metadata, ensure_ascii=False),
+                    json.dumps(document.tags, ensure_ascii=False),
                 ),
             )
             conn.executemany(
@@ -72,7 +72,7 @@ def insert_document(document: Document, chunks: list[Chunk], db_path: Path | Non
                         chunk.document_id,
                         chunk.chunk_index,
                         chunk.content,
-                        json.dumps(chunk.metadata),
+                        json.dumps(chunk.metadata, ensure_ascii=False),
                     )
                     for chunk in chunks
                 ],
@@ -190,6 +190,69 @@ def delete_all_documents(db_path: Path | None = None) -> None:
             conn.execute("DELETE FROM documents")
     finally:
         conn.close()
+
+
+def find_documents(
+    created_after: datetime | None = None,
+    created_before: datetime | None = None,
+    keyword: str | None = None,
+    source: str | None = None,
+    db_path: Path | None = None,
+) -> list[DocumentSummary]:
+    """依日期範圍、關鍵字、來源找文件,三種條件是「符合任一個就算」(OR),不是同時符合。
+
+    日期範圍(`created_after`/`created_before`)算一組:兩個都給的話彼此是 AND
+    (定義一段區間),這段區間再跟關鍵字/來源用 OR 組合。沒給任何條件會回傳空
+    list,呼叫端應該視為「至少要給一個條件」的錯誤,不要當成「符合全部」處理。
+    """
+    conditions: list[str] = []
+    params: list[str] = []
+
+    if created_after is not None or created_before is not None:
+        date_parts = []
+        if created_after is not None:
+            date_parts.append("d.created_at >= ?")
+            params.append(created_after.isoformat())
+        if created_before is not None:
+            date_parts.append("d.created_at <= ?")
+            params.append(created_before.isoformat())
+        conditions.append("(" + " AND ".join(date_parts) + ")")
+
+    if keyword is not None:
+        like = f"%{keyword}%"
+        conditions.append("(d.title LIKE ? OR d.content LIKE ? OR d.tags LIKE ?)")
+        params.extend([like, like, like])
+
+    if source is not None:
+        conditions.append("d.source_path LIKE ?")
+        params.append(f"%{source}%")
+
+    if not conditions:
+        return []
+
+    conn = _connect(db_path)
+    try:
+        rows = conn.execute(
+            "SELECT d.id, d.title, d.source_path, d.created_at, d.tags, COUNT(c.id) "
+            "FROM documents d LEFT JOIN chunks c ON c.document_id = d.id "
+            f"WHERE {' OR '.join(conditions)} "
+            "GROUP BY d.id ORDER BY d.created_at",
+            params,
+        ).fetchall()
+    finally:
+        conn.close()
+
+    return [
+        DocumentSummary(
+            id=row[0],
+            title=row[1],
+            source_path=row[2],
+            created_at=datetime.fromisoformat(row[3]),
+            tags=json.loads(row[4]),
+            chunk_count=row[5],
+        )
+        for row in rows
+    ]
 
 
 def _row_to_feed_subscription(row: tuple) -> FeedSubscription:

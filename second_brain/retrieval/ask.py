@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass, field
+
 import anthropic
 
 from second_brain.config import ANSWER_MODEL
+from second_brain.models import SearchResult
 from second_brain.retrieval.search import search
 
 SYSTEM_PROMPT = (
@@ -15,11 +18,17 @@ SYSTEM_PROMPT = (
 )
 
 
-def ask(query: str, top_k: int = 5) -> str:
+@dataclass
+class AskResult:
+    answer: str
+    sources: list[SearchResult] = field(default_factory=list)
+
+
+def ask(query: str, top_k: int = 5) -> AskResult:
     results = search(query, top_k=top_k)
 
     if not results:
-        return "知識庫裡目前沒有相關的筆記可以回答這個問題。"
+        return AskResult(answer="知識庫裡目前沒有相關的筆記可以回答這個問題。")
 
     context = "\n\n".join(
         f"[來源: {result.document.title}]\n{result.chunk.content}" for result in results
@@ -38,4 +47,5 @@ def ask(query: str, top_k: int = 5) -> str:
         ],
     )
 
-    return "".join(block.text for block in response.content if block.type == "text")
+    answer = "".join(block.text for block in response.content if block.type == "text")
+    return AskResult(answer=answer, sources=results)

@@ -4,31 +4,35 @@
 使用方式看 [README.md](README.md),規劃看 [CLAUDE.md](CLAUDE.md)。這份只記錄
 「現在做到哪、為什麼這樣做、接下來大概要做什麼」,每次做完一個階段性任務就更新。
 
-最後更新:2026-07-12(第三輪)
+最後更新:2026-07-12(第四輪)
 
 ## 現況一句話
 
 CLAUDE.md 的 MVP(`add` / `search` / `ask`)已經做完,另外多做了 `list`、
 `remove`、`clear`、`add-feed`(RSS/Atom ingestion)、自動打標籤、Streamlit
-網頁介面、一鍵啟動、**feed 訂閱清單**(`second-brain feeds add/list/remove/
-sync`,第二輪做的,已 commit 進 `302939b`)。**這輪(第三輪)把訂閱清單補進
-網頁介面**:使用者問「接下來做什麼好」,我推薦兩個方向(網頁介面補訂閱清單 /
-hybrid search),使用者選了前者。過程中用 Claude Browser pane 實際跑過一次
-完整流程(訂閱→自動抓標題→首次同步→個別同步→取消訂閱),抓到並修掉兩個 bug:
-(1) CLI 的 `feeds add` 訂閱後是自己手動重跑一遍 `load_feed`+`ingest_document`,
-沒有呼叫 `sync_feed_subscription()`,導致 `last_synced_at` 一直沒被更新
-(手動測試時親眼看到 `feeds list` 顯示「尚未同步」但文章明明已經抓進去);
-(2) 網頁介面的「同步」/「同步全部」按鈕在印出 `st.success`/`st.error` 訊息
-後馬上呼叫 `st.rerun()`,導致訊息瞬間被洗掉、使用者看不到同步結果——這兩個
-都是**真的會壞掉的 bug,不是預防性修改**,見下面決策說明。65 個測試全過
-(新增功能都是重用既有、已測過的 `pipeline.sync_feed_subscription()`,沒有
-新增測試檔案,但手動在瀏覽器裡逐步驗證過)。**這輪的變更還沒 commit**,下一個
-對話開始時記得先確認要不要 commit 掉。
+網頁介面、一鍵啟動、feed 訂閱清單(CLI + 網頁介面兩邊都有,第二、三輪做的,
+分別 commit 進 `302939b`/`e12d091`)。**這輪(第四輪)做了兩件事**,是使用者
+直接提的需求,沒有先問方向:(1) 讓 `search`/`ask` 的結果顯示時間戳記——問清楚
+後發現使用者要的其實只是「顯示」,`Document.created_at` 本來就有,不用改
+schema;(2) 新增 `second-brain remove-batch`,依日期範圍/關鍵字/來源批次
+刪除文件,三個條件是使用者要求的 **OR**(符合任一個就刪,不是同時符合)。
+過程中抓到一個真的會壞掉的 bug:**`documents.tags`/`metadata` 兩個 JSON
+欄位存的時候用預設 `json.dumps()`,中文字會被轉成 `\uXXXX` 跳脫,導致
+`remove-batch --keyword` 用 SQL `LIKE` 比對標籤時完全比對不到中文標籤**——
+已修成 `ensure_ascii=False`,但**這次修正之前就存在的舊資料(包含使用者
+真實的 BBC 文章)`tags` 欄位還是舊格式,要重新 `add`/`feeds sync` 過一次
+才會用新格式存**,見下面決策說明。71 個測試全過(新增 6 個 `find_documents`/
+`remove_documents` 測試,`ask` 的既有測試也跟著回傳型別改動更新)。手動在
+CLI 跟瀏覽器裡都逐步驗證過(`remove-batch` 的 OR 邏輯、日期範圍、確認流程、
+`--yes`、`search`/`ask` 顯示時間都實際跑過一次)。**這輪的變更還沒 commit**,
+下一個對話開始時記得先確認要不要 commit 掉。**使用者這輪一開始說要先去前端
+檢查上一輪(第三輪)做的東西沒問題就 push,還沒收到「檢查完畢」的回覆就先
+提了這兩個新需求**,下一個對話開始時要留意「push」這件事有沒有還懸著。
 
 ## 環境
 
 - Windows,Python 3.14.4,`.venv/` 在專案根目錄(已裝好所有依賴,含 torch/sentence-transformers/chromadb/anthropic/jieba/feedparser/streamlit)
-- 沒有 git remote,只有本機 repo
+- **這輪發現 repo 其實已經有 git remote**(`origin` → `https://github.com/frobel0520/second-brain.git`),上一輪筆記寫的「沒有 git remote,只有本機 repo」已經過時,是使用者自己後來加的,沒有回報。**以後開始交接檢查時,`git remote -v` 也要順便看一下**,不要只信筆記。
 - 常用指令:
   ```bash
   ./.venv/Scripts/python.exe -m pytest -q                    # 跑測試,~4 秒,不用真的 embedding 模型
@@ -38,19 +42,20 @@ hybrid search),使用者選了前者。過程中用 Claude Browser pane 實際�
 
 ## 已經做完的東西
 
-十一個 CLI 指令全部能動,架構細節看 [README.md](README.md#架構):
+十二個 CLI 指令全部能動,架構細節看 [README.md](README.md#架構):
 
 1. `second-brain add <file>` — 讀 md/txt → 自動打標籤(本機 jieba 詞頻抽取)→ 切塊 → embedding(本機 sentence-transformers)→ 存 SQLite + ChromaDB。**同一份筆記再 add 一次會先刪舊版本再存新的**(`storage/store.py:replace_existing_document`),不是 append。「同一份筆記」的判斷邏輯之前升級過,見下面決策說明。
 2. `second-brain add-feed <feed_url> [--limit/-n N]` — **一次性**抓取 RSS/Atom 來源,把每篇文章轉成一個 Document,跑同一套 `ingest_document()` 流程(標籤/切塊/embedding/dedupe/存檔),不會記住這個來源。這輪用真實的 BBC News 網址實測過,見下面專節說明。
-3. `second-brain search "<query>" [--top-k K]` — query 轉 embedding → ChromaDB cosine 相似度搜尋 → 印出來源+分數。
-4. `second-brain ask "<query>" [--top-k K]` — 在 search 結果上組 context,呼叫 Anthropic API(`claude-opus-4-8`,寫死在 `config.ANSWER_MODEL`)做 RAG 問答。
+3. `second-brain search "<query>" [--top-k K]` — query 轉 embedding → ChromaDB cosine 相似度搜尋 → 印出來源+分數+**加入時間**(第四輪加的,`Document.created_at` 本來就有,只是沒印出來)。
+4. `second-brain ask "<query>" [--top-k K]` — 在 search 結果上組 context,呼叫 Anthropic API(`claude-opus-4-8`,寫死在 `config.ANSWER_MODEL`)做 RAG 問答。**第四輪把 `ask()` 的回傳型別從純字串改成 `AskResult(answer, sources)` dataclass**,CLI 在答案下面多印一段「來源:標題(時間)」清單,見下面決策說明。
 5. `second-brain list` — 列出知識庫裡的文件(標題、片段數、來源路徑、標籤)。
 6. `second-brain remove <source>` — 從知識庫刪除指定來源的紀錄(sqlite + chroma),不動硬碟上的檔案本身。純比對 `source_path`,**不會**做內容比對(remove 是明確指名要刪哪個來源,跟 add 的模糊 dedupe 語意不一樣)。`source` 參數型別**這輪改成 `str`,不是 `Path`**,而且**沒有** `exists=True`,因為要能刪除已經從硬碟上消失的檔案的舊紀錄,也要能刪 RSS 文章的網址(見下面決策說明的 bug 修復)。
 7. `second-brain clear [--yes/-y]` — 清空整個知識庫(sqlite + chroma)。預設用 `typer.confirm()` 互動確認,`--yes`/`-y` 跳過確認直接清空(給腳本/非互動情境用)。不動硬碟上的原始檔案。
-8. `second-brain feeds add <feed_url> [--name] [--limit/-n N]` — 把來源加進訂閱清單(SQLite `feeds` 表)並立刻同步一次;`--name` 不給的話會嘗試呼叫 `rss_loader.get_feed_title()` 抓 feed 頻道標題,抓不到就用網址本身當名稱。同一個網址重複 `feeds add` 會被拒絕(印出「已經訂閱過」,exit code 1),不會建立第二筆訂閱紀錄。**這輪(第三輪)改成內部直接呼叫 `sync_feed_subscription()`**,不再自己手動重跑一次 `load_feed`+`ingest_document`,順便修掉「訂閱後 `last_synced_at` 沒更新」的 bug,見下面決策說明。
-9. `second-brain feeds list` — **這輪新加**。列出訂閱清單:名稱、網址、上次同步時間(`尚未同步` 或時間戳)。
-10. `second-brain feeds remove <feed_url>` — **這輪新加**。從訂閱清單移除來源(刪 `feeds` 表那一列),**不會**動到已經加入知識庫的文章——訂閱清單只是「要不要繼續追蹤」的紀錄,跟文章本身是否留在知識庫是兩件事,要連文章一起刪要另外用 `second-brain remove <文章網址>`。
-11. `second-brain feeds sync [--limit/-n N]` — **這輪新加**。同步訂閱清單裡的**所有**來源:對每個訂閱依序呼叫 `load_feed()` + `ingest_document()`,更新 `last_synced_at`,印出每個來源「新增 X 篇、更新 Y 篇、略過 Z 篇」。**單一來源抓取/解析失敗不會擋住其他來源**——`pipeline.sync_feed_subscription()` 把例外包進 `FeedSyncResult.error`,不會往外拋,`feeds sync` 對每個來源印出「同步失敗:{原因}」後繼續處理下一個。
+8. `second-brain feeds add <feed_url> [--name] [--limit/-n N]` — 把來源加進訂閱清單(SQLite `feeds` 表)並立刻同步一次;`--name` 不給的話會嘗試呼叫 `rss_loader.get_feed_title()` 抓 feed 頻道標題,抓不到就用網址本身當名稱。同一個網址重複 `feeds add` 會被拒絕(印出「已經訂閱過」,exit code 1),不會建立第二筆訂閱紀錄。內部直接呼叫 `sync_feed_subscription()` 做第一次同步,不會自己重複一遍 load/ingest 迴圈。
+9. `second-brain feeds list` — 列出訂閱清單:名稱、網址、上次同步時間(`尚未同步` 或時間戳)。
+10. `second-brain feeds remove <feed_url>` — 從訂閱清單移除來源(刪 `feeds` 表那一列),**不會**動到已經加入知識庫的文章——訂閱清單只是「要不要繼續追蹤」的紀錄,跟文章本身是否留在知識庫是兩件事,要連文章一起刪要另外用 `second-brain remove <文章網址>`。
+11. `second-brain feeds sync [--limit/-n N]` — 同步訂閱清單裡的**所有**來源:對每個訂閱依序呼叫 `sync_feed_subscription()`,更新 `last_synced_at`,印出每個來源「新增 X 篇、更新 Y 篇、略過 Z 篇」。**單一來源抓取/解析失敗不會擋住其他來源**——`pipeline.sync_feed_subscription()` 把例外包進 `FeedSyncResult.error`,不會往外拋,`feeds sync` 對每個來源印出「同步失敗:{原因}」後繼續處理下一個。
+12. `second-brain remove-batch [--after DATE] [--before DATE] [--keyword K] [--source S] [--yes/-y]` — **第四輪新加**。依日期範圍/關鍵字/來源批次刪除文件,三個條件是**使用者要求的 OR**(符合任一個就刪,不是同時符合),`--after`/`--before` 兩個一起給是例外、彼此是 AND(定義一段區間)。**至少要給一個條件**,不然要用 `clear`。刪除前會列出符合的文件並要求確認(跟 `clear` 同樣的安全機制,`--yes` 可跳過)。日期格式是 `YYYY-MM-DD`,格式錯會被 typer 擋下來,不會靜默失敗。底層是 `storage/sqlite_store.py:find_documents()`,用動態組出的 `WHERE (cond1) OR (cond2) OR (cond3)` 查詢,`storage.remove_documents(ids)` 批次刪。
 
 **自動打標籤**(是「自動化處理」這個大方向的第一小步):`add`/`add-feed` 讀進文件後會呼叫 `processing/tagging.py` 的 `get_tagging_provider().tag(document)`,把結果存進 `Document.tags`(SQLite `documents.tags` 欄位,JSON 字串)。`list`/`add`/`add-feed` 的輸出訊息都會顯示標籤。`TaggingProvider` 是抽象介面(跟 `EmbeddingProvider` 同樣的設計慣例),目前唯一實作是 `KeywordFrequencyTaggingProvider`:用 jieba 斷詞(中文)+ 保留原樣的英文單字,濾掉停用詞,取詞頻最高的前 `config.MAX_TAGS`(預設 5)個當標籤。之後要換成 LLM 分類或規則式邏輯,只要換掉 `get_tagging_provider()` 回傳的實作。
 
@@ -105,6 +110,12 @@ hybrid search),使用者選了前者。過程中用 Claude Browser pane 實際�
 - **第三輪:瀏覽器自動化操作 Streamlit 的 `text_input` 這次踩到的細節,補充上一輪的筆記**:上一輪筆記寫「要用 `javascript_tool` 搭配原生 setter + dispatchEvent keydown Enter」,這輪實測發現:用 `form_input` 工具(原生 setter,不含事件派發)先把值寫進 DOM,再用 `computer` 的 `left_click` 點擊**另一個欄位**(觸發 blur)一樣能讓 Streamlit 端收到新值、跑出對應的按鈕/畫面——不一定要模擬 Enter 鍵。另外**踩到一個新陷阱**:用 `computer` 的 `key` 動作送 `ctrl+a` 想清空欄位再 `type` 新內容,結果兩次的內容疊在一起變成重複貼上(可能是 `ctrl+a` 在該元件裡沒有真的選取全部文字)。**以後要清空 Streamlit 文字輸入框再填新值,優先用 `form_input` 直接設定完整值(它是整個覆蓋,不是插入),不要用 `ctrl+a` + `type` 這個組合**,比較不會出現內容重複疊加的問題。
 - **手動驗證網頁介面時發現的自動化工具限制**(跟程式碼本身無關,記錄下來是因為之後如果還要用瀏覽器自動化測 Streamlit 應用會再踩到):`computer` 工具的 `type`/`key` 動作有時候不會觸發 Streamlit React 元件的內部事件處理(尤其是 `st.text_input` 需要「真的」keydown 事件才會 commit 值並觸發 rerun),用 `javascript_tool` 搭配原生 `HTMLInputElement` 的 setter(`Object.getOwnPropertyDescriptor(...).set`)+ 手動 `dispatchEvent(new KeyboardEvent('keydown', {keyCode:13,...}))` 比較可靠。另外這次的瀏覽器 `screenshot` 動作一直逾時,改用 `get_page_text`/`read_page`/直接查 DB 驗證資料正確性,不影響驗證結果。
 - **`run_web.bat` 一開始沒處理 Streamlit 的「Welcome」提示,會整個卡死**:第一次手動測試雙擊啟動時,發現視窗開了、python 進程也在跑,但 port 8501 永遠沒 bind、瀏覽器打不開。原因是 Streamlit 第一次在「有 console 但沒人可以互動輸入」的情況下執行(例如被 `Start-Process`/雙擊捷徑這種方式啟動的分離視窗),會卡在一個一次性的「Welcome to Streamlit,請輸入 email 或按 Enter 跳過」的 stdin 提示——沒有 `%USERPROFILE%\.streamlit\credentials.toml` 這個檔案就會觸發,而這個提示沒人能按,就永遠卡住,連錯誤訊息都不會印。**這是一個真的修好的 bug,不是預防性程式碼**:一開始想用手動在使用者機器上建一個全域 `credentials.toml` 來解決,但那樣的話這個 repo 換一台機器/換一個使用者就會重現同樣的卡住,所以改成讓 `run_web.bat` 自己在啟動前檢查、不存在就自動建立空的 `credentials.toml`(內容是 `[general]\nemail = ""`),讓它在任何機器上第一次雙擊都能正常動,不用任何人先手動用終端機跑過一次去回答那個提示。用「先刪掉這個檔案模擬全新機器」的方式驗證過批次檔真的能自己處理好這個情況。
+- **第四輪:問清楚「時間戳記」要解決的問題,結果比想像中簡單**:一開始收到「每筆資料加上時間戳記」這個需求時,先入為主猜可能是要解決「更新等於刪掉重建、原始加入時間會被洗掉」這個更深的問題(這個問題確實存在,見下一條),準備了兩個選項問使用者。使用者選的是最簡單那個:`Document.created_at` 本來就有,只是 `search`/`ask` 沒印出來。**教訓**:需求字面上的意思跟我腦補的「應該是想解決的深層問題」不一定一樣,寧可先問清楚範圍,不要直接動 schema。
+- **第四輪:`ask()` 回傳型別從 `str` 改成 `AskResult(answer, sources)` dataclass,不是加一個平行的新函式**:因為要在答案下面附上來源標題+時間,`ask()` 內部本來就已經呼叫過 `search()` 拿到帶時間戳的 `SearchResult` 列表,直接把這個列表原封不動放進回傳值最省事,不用再呼叫一次 `search()`(那樣會重複算一次 embedding,浪費且可能因為非確定性 embedding provider 導致兩次結果不一致)。**這是一個會動到既有介面的改動**:`ask()` 的呼叫端(`cli.py`、`web.py`、`tests/retrieval/test_ask.py`)都要跟著改讀 `.answer`/`.sources`,不是巧合地保持相容——這類「回傳值型別變更」的改動要記得抓 grep 一次所有呼叫端,不能只改定義端。
+- **第四輪(真的會壞掉的 bug):`documents.tags`/`metadata` 用預設 `json.dumps()` 存,中文字被跳脫成 `\uXXXX`,導致 `LIKE` 關鍵字比對比不到**:寫 `remove-batch --keyword` 的關鍵字比對邏輯時,對三個欄位(`title`/`content`/`tags`)都用 `LIKE '%關鍵字%'`,`title`/`content` 是純文字沒問題,但 `tags` 欄位是 `json.dumps(document.tags)` 存的 JSON 字串——**Python `json.dumps()` 預設 `ensure_ascii=True`,中文字元會被轉成 `\uXXXX` 逃逸序列**,存進 SQLite 的實際內容變成類似 `["資料庫"]` 而不是 `["資料庫"]`,拿中文關鍵字下去 `LIKE` 當然比對不到。寫測試(`test_find_documents_matches_keyword_in_title_content_or_tags`)時當場抓到,不是憑空想到的。**修法**:`sqlite_store.py` 裡三個 `json.dumps()` 呼叫(`document.metadata`、`document.tags`、`chunk.metadata`)全部加上 `ensure_ascii=False`,讓中文以原始 UTF-8 存進 SQLite(SQLite 本身是 UTF-8,原生支援,沒有理由多繞一層跳脫)。**這個修正只對「之後新寫入」的資料有效**,這次修正之前就已經存在的舊資料(包含使用者真實的 BBC 中文網文章)`tags` 欄位仍然是舊的跳脫格式,`remove-batch --keyword` 對這些舊文件的標籤比對還是會比不到(標題/內容本來就是純文字欄位,不受影響,還是比對得到)——這個專案目前沒有 migration 機制(同樣的坑之前 `tags` 欄位本身、`feeds` 表都踩過),要嘛重新 `add`/`feeds sync` 一次讓資料用新格式重寫,要嘛之後有需要再考慮寫一個一次性的 migration script 把舊 `tags` 欄位轉成 `ensure_ascii=False` 格式。
+- **第四輪:`remove-batch` 的 OR 邏輯是使用者明確要求的,不是我預設的選擇**:實作前有問使用者「日期/關鍵字/來源同時給的話要 AND 還是 OR」,使用者選 OR(符合任一個就刪)。這跟我原本設想的「AND 比較不容易誤刪」直覺不一樣,**這是使用者確認過的設計,不是應該被「修正」的東西**,以後如果要改這個行為要重新跟使用者確認,不要自己覺得「AND 比較安全」就默默改掉。`--after`/`--before` 兩個一起給是唯一的例外(彼此是 AND,定義一段日期區間),因為單獨拆成兩個 OR 條件會沒有意義(任何日期都會符合「早於某天」或「晚於某天」其中之一)。
+- **第四輪:`remove-batch` 沿用 `clear` 的安全機制(列出項目 + 互動確認 + `--yes` 跳過),沒有另外問使用者**:因為這是既有專案慣例(`clear` 已經這樣做),批次刪除又比單筆 `remove` 危險,套用同一個模式是最小驚訝的做法,不需要每次遇到「這個操作有點危險」就重新問一次要怎麼做確認機制。
+- **第四輪:`remove-batch` 至少要求一個篩選條件,不給任何條件會被擋下來並導去 `clear`**:如果讓「什麼條件都不給」的 `remove-batch` 等同「刪除全部」,會跟 `clear` 語意重疊、而且更容易因為忘記打條件而誤刪全部知識庫(`clear` 至少指令名稱就在警告你「這是清空」,`remove-batch` 沒打條件不會有這種直覺提示)。
 
 ## 已知的粗糙邊界(還沒處理,不算 bug,是刻意先跳過)
 
@@ -122,6 +133,9 @@ hybrid search),使用者選了前者。過程中用 Claude Browser pane 實際�
 - **網頁介面的「新增筆記」完成後不會自動導去「瀏覽」分頁**,使用者要自己點過去才看得到剛加的東西(見上面決策說明)。
 - **網頁介面目前沒有針對大量文件的分頁/捲動優化**,跟 CLI 的 `list` 一樣是先求能動,文件一多畫面會變長。
 - **`streamlit` 是獨立的 optional dependency**(`pyproject.toml` 的 `[project.optional-dependencies].ui`),裝 `.[dev]` 不會自動裝到,要另外 `pip install -e ".[ui]"` 或 `.[dev,ui]`。
+- **第四輪:`remove-batch` 只有 CLI,網頁介面沒有對應的批次刪除 UI**,跟第二輪的 `feeds` 系列指令一開始一樣,先在 CLI 做完;批次刪除本身又比訂閱清單更危險(會真的刪掉文件),要不要加進網頁介面、加的話要怎麼做確認機制,建議先問使用者再做,不要自己假設。
+- **第四輪:`remove-batch` 的 `--after`/`--before` 只支援 `YYYY-MM-DD` 絕對日期,沒有「N 天前」這種相對日期的簡寫**,要刪「30 天前的文章」得自己算出日期字串。之後如果常用可以加 `--older-than-days N` 這種語法糖,MVP 先不做。
+- **第四輪:`remove-batch --keyword` 對這次修正之前就存在的舊資料,標籤比對不到中文**(`tags` 欄位還是舊的 `ensure_ascii=True` 跳脫格式),標題/內容欄位不受影響。見上面「決策」段落的詳細說明,要嘛重新 `add`/`feeds sync`,要嘛之後寫一次性 migration script。
 
 ## 接下來可能的方向(還沒決定)
 
@@ -131,20 +145,22 @@ CLAUDE.md「未來規劃方向」列的:
 - 自動化處理的其餘部分(關聯筆記推薦、去重複——自動打標籤這一小塊已經做完)
 - Web UI 或 Raycast/Alfred 整合(**Streamlit 網頁介面已經做完基本版,而且使用者本人已經用過**,如果要往「多人使用」或更精緻互動的方向,可能要考慮換成正式 web app)
 
-使用者說這些方向都想做,已經照優先順序做完 `remove` → 「更聰明的 dedupe」+「清空知識庫指令」→ 「自動打標籤(殼)」→ 「RSS ingestion」→ 「Streamlit 網頁介面」→「一鍵啟動」→ 「feed 訂閱清單(CLI)」→ **「feed 訂閱清單補進網頁介面」(這輪)**。**下一個對話開始時,建議問使用者接下來要做哪個**,不要自己選。這輪問的時候我推薦了兩個方向(補網頁介面 / hybrid search),使用者選了補網頁介面;**hybrid search 還沒做,是目前排在前面的候選**。
+使用者說這些方向都想做,已經照優先順序做完 `remove` → 「更聰明的 dedupe」+「清空知識庫指令」→ 「自動打標籤(殼)」→ 「RSS ingestion」→ 「Streamlit 網頁介面」→「一鍵啟動」→ 「feed 訂閱清單(CLI)」→ 「feed 訂閱清單補進網頁介面」→ **「search/ask 顯示時間 + remove-batch 批次刪除」(第四輪,使用者直接提的,沒有先選方向)**。**下一個對話開始時,建議問使用者接下來要做哪個**,不要自己選,除非使用者又直接提了具體需求。**hybrid search 還沒做,連續兩輪都排在候選最前面,但使用者這兩輪都選了別的**,不代表使用者不想做,只是還沒排到,不要因為連續沒被選就自己降低它的排序。
 
 候選(不代表優先順序):
-- **Hybrid search**(這輪推薦過、使用者說「先做」補網頁介面的那個,這個候選還在等):目前 `search`/`ask` 只有語意搜尋(向量相似度),對精確詞彙查詢(人名、專有名詞)通常不如關鍵字搜尋準。加關鍵字 + 語意並用,會直接讓所有既有筆記的搜尋品質提升,不像新 ingestion 來源那樣只影響新加的內容。
+- **Hybrid search**:目前 `search`/`ask` 只有語意搜尋(向量相似度),對精確詞彙查詢(人名、專有名詞)通常不如關鍵字搜尋準。加關鍵字 + 語意並用,會直接讓所有既有筆記的搜尋品質提升,不像新 ingestion 來源那樣只影響新加的內容。
 - 更多 ingestion 來源(瀏覽器書籤、Readwise/Instapaper、Obsidian/Notion 匯出)。
 - **YouTube 頻道 RSS**:對話中討論過,使用者問過但決定「先不做」。要注意的是 YouTube 頻道 RSS 只有標題+短描述,**沒有逐字稿**,能做的頂多是「新影片書籤」,不是「影片內容知識庫」;如果之後想做後者,得另外接字幕/逐字稿的來源,不是單純的 RSS ingestion 可以解決的,下次有人提這個要先講清楚這個限制。
-- Hybrid search、關聯筆記推薦、去重複。
+- 關聯筆記推薦、去重複。
 - 網頁介面的細節打磨(新增後自動跳轉、分頁、更明確的操作回饋)——使用者已經開始實際用網頁介面,這些會變得比較有感。
+- **網頁介面補上 `remove-batch` 的批次刪除 UI**:CLI 這輪已經做完,見「已知的粗糙邊界」。
 - **`feeds sync` 排程自動化**:目前要手動打指令才會同步,如果之後想要「每天自動同步一次」,得另外接排程機制(cron/Windows工作排程器),CLAUDE.md 的 MVP 階段明確說「自動化排程」先不做,是刻意排除的範圍,提之前先確認使用者真的想跨出 MVP 範圍。
+- **舊資料的 `tags` 欄位 migration**:把這次修正之前存進去的 ASCII 跳脫格式標籤轉成 `ensure_ascii=False` 格式,讓 `remove-batch --keyword` 對舊文件的標籤比對也能生效。不急,先重新 `add`/`feeds sync` 一次也能解決,只是比較手動。
 
 ## 交接檢查清單(接手時建議做的事)
 
-1. `git log --oneline` 確認目前在哪個 commit,`git status` 確認有沒有沒 commit 的東西(這次交接時,**第三輪:網頁介面訂閱管理分頁 + `feeds add`/`st.rerun()` 兩個 bug 修復,這批預期還沒 commit**;第二輪的 feed 訂閱清單 CLI + `remove` bug 修復已經進了 `302939b`)
-2. `./.venv/Scripts/python.exe -m pytest -q` 應該要 65 個全過、~4 秒內跑完(這輪沒加新測試檔案,新功能是重用已測過的 `pipeline.sync_feed_subscription()`,靠手動瀏覽器驗證,不是新增自動化測試)
+1. `git log --oneline` 確認目前在哪個 commit,`git status` 確認有沒有沒 commit 的東西(這次交接時,**第四輪:search/ask 顯示時間 + `remove-batch` + tags 中文編碼 bug 修復,這批預期還沒 commit**;第二、三輪的 feed 訂閱清單 CLI/網頁介面已經分別進了 `302939b`/`e12d091`)。**另外 `git remote -v` 也確認一下**——這輪發現 repo 其實已經接了 `origin`(`github.com/frobel0520/second-brain.git`),上一輪筆記寫錯了,不要只信筆記。
+2. `./.venv/Scripts/python.exe -m pytest -q` 應該要 71 個全過、~5 秒內跑完
 3. 如果要手動測 `add`/`search`,第一次跑會下載 ~90MB 的 embedding 模型,需要網路;jieba 第一次執行也會在本機建 prefix dict 快取(不用連網,純本機運算,第一次會慢個零點幾秒)
 4. 如果要手動測 `ask`,需要使用者提供 `ANTHROPIC_API_KEY`(這台機器目前沒設,使用者已經知道怎麼設定,是自己的事,不用主動催)
 5. `pyproject.toml` 這輪陸續加了 `jieba>=0.42`、`feedparser>=6.0`、`streamlit>=1.38`(在 `[project.optional-dependencies].ui`,不在預設 `dev` 裡)依賴,如果是全新環境要記得重新 `pip install -e ".[dev]"`(CLI/測試)跟 `pip install -e ".[ui]"`(網頁介面)

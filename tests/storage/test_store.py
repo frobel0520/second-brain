@@ -1,3 +1,4 @@
+from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
@@ -141,3 +142,106 @@ def test_mark_feed_synced_sets_last_synced_at() -> None:
 
     subscriptions = store.list_feed_subscriptions()
     assert subscriptions[0].last_synced_at is not None
+
+
+def _document_with_created_at(
+    doc_id: str, source_path: str, title: str, created_at: datetime, content: str = "內容", tags: list[str] | None = None
+) -> tuple[Document, list[Chunk]]:
+    document = Document(
+        id=doc_id, source_path=source_path, title=title, content=content, created_at=created_at, tags=tags or []
+    )
+    chunks = [Chunk(id=f"{doc_id}-chunk", document_id=doc_id, content=content, chunk_index=0, embedding=[0.1, 0.2])]
+    return document, chunks
+
+
+def test_find_documents_returns_empty_list_when_no_filters_given() -> None:
+    document, chunks = _document_with_created_at(
+        "doc-1", "/tmp/a.md", "A", datetime(2026, 1, 1, tzinfo=timezone.utc)
+    )
+    store.save_document(document, chunks)
+
+    assert store.find_documents() == []
+
+
+def test_find_documents_matches_date_range() -> None:
+    old_doc, old_chunks = _document_with_created_at(
+        "doc-old", "/tmp/old.md", "舊筆記", datetime(2026, 1, 1, tzinfo=timezone.utc)
+    )
+    new_doc, new_chunks = _document_with_created_at(
+        "doc-new", "/tmp/new.md", "新筆記", datetime(2026, 6, 1, tzinfo=timezone.utc)
+    )
+    store.save_document(old_doc, old_chunks)
+    store.save_document(new_doc, new_chunks)
+
+    matches = store.find_documents(created_after=datetime(2026, 3, 1, tzinfo=timezone.utc))
+
+    assert [m.id for m in matches] == ["doc-new"]
+
+
+def test_find_documents_matches_keyword_in_title_content_or_tags() -> None:
+    doc_a, chunks_a = _document_with_created_at(
+        "doc-a", "/tmp/a.md", "資料庫筆記", datetime(2026, 1, 1, tzinfo=timezone.utc), content="這是內容"
+    )
+    doc_b, chunks_b = _document_with_created_at(
+        "doc-b", "/tmp/b.md", "無關筆記", datetime(2026, 1, 1, tzinfo=timezone.utc), tags=["資料庫"]
+    )
+    doc_c, chunks_c = _document_with_created_at(
+        "doc-c", "/tmp/c.md", "完全無關", datetime(2026, 1, 1, tzinfo=timezone.utc)
+    )
+    store.save_document(doc_a, chunks_a)
+    store.save_document(doc_b, chunks_b)
+    store.save_document(doc_c, chunks_c)
+
+    matches = store.find_documents(keyword="資料庫")
+
+    assert {m.id for m in matches} == {"doc-a", "doc-b"}
+
+
+def test_find_documents_matches_source_substring() -> None:
+    doc_a, chunks_a = _document_with_created_at(
+        "doc-a", "https://bbc.com/news/1", "文章一", datetime(2026, 1, 1, tzinfo=timezone.utc)
+    )
+    doc_b, chunks_b = _document_with_created_at(
+        "doc-b", "/tmp/local.md", "本機筆記", datetime(2026, 1, 1, tzinfo=timezone.utc)
+    )
+    store.save_document(doc_a, chunks_a)
+    store.save_document(doc_b, chunks_b)
+
+    matches = store.find_documents(source="bbc.com")
+
+    assert [m.id for m in matches] == ["doc-a"]
+
+
+def test_find_documents_combines_filters_with_or() -> None:
+    date_match, date_chunks = _document_with_created_at(
+        "doc-date", "/tmp/date.md", "日期符合", datetime(2026, 1, 1, tzinfo=timezone.utc)
+    )
+    keyword_match, keyword_chunks = _document_with_created_at(
+        "doc-keyword", "/tmp/keyword.md", "關鍵字符合", datetime(2026, 6, 1, tzinfo=timezone.utc), content="貓咪"
+    )
+    no_match, no_match_chunks = _document_with_created_at(
+        "doc-none", "/tmp/none.md", "都不符合", datetime(2026, 6, 1, tzinfo=timezone.utc)
+    )
+    store.save_document(date_match, date_chunks)
+    store.save_document(keyword_match, keyword_chunks)
+    store.save_document(no_match, no_match_chunks)
+
+    matches = store.find_documents(created_before=datetime(2026, 2, 1, tzinfo=timezone.utc), keyword="貓咪")
+
+    assert {m.id for m in matches} == {"doc-date", "doc-keyword"}
+
+
+def test_remove_documents_deletes_by_id_and_returns_titles() -> None:
+    doc_a, chunks_a = _document_with_created_at(
+        "doc-a", "/tmp/a.md", "A", datetime(2026, 1, 1, tzinfo=timezone.utc)
+    )
+    doc_b, chunks_b = _document_with_created_at(
+        "doc-b", "/tmp/b.md", "B", datetime(2026, 1, 1, tzinfo=timezone.utc)
+    )
+    store.save_document(doc_a, chunks_a)
+    store.save_document(doc_b, chunks_b)
+
+    removed_titles = store.remove_documents(["doc-a", "doc-missing"])
+
+    assert removed_titles == ["A"]
+    assert [d.id for d in store.list_documents()] == ["doc-b"]
