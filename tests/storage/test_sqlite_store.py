@@ -1,6 +1,7 @@
+from datetime import datetime, timezone
 from pathlib import Path
 
-from second_brain.models import Chunk, Document
+from second_brain.models import Chunk, Document, FeedSubscription
 from second_brain.storage import sqlite_store
 
 
@@ -120,3 +121,56 @@ def test_delete_all_documents_removes_everything(tmp_path: Path) -> None:
 
     assert sqlite_store.list_documents(db_path=db_path) == []
     assert sqlite_store.get_chunk_ids("doc-a", db_path=db_path) == []
+
+
+def test_insert_feed_subscription_round_trips(tmp_path: Path) -> None:
+    db_path = tmp_path / "test.db"
+    feed = FeedSubscription(id="feed-1", url="https://example.com/rss.xml", name="Example Feed")
+
+    sqlite_store.insert_feed_subscription(feed, db_path=db_path)
+    fetched = sqlite_store.get_feed_subscription_by_url("https://example.com/rss.xml", db_path=db_path)
+
+    assert fetched is not None
+    assert fetched.id == "feed-1"
+    assert fetched.name == "Example Feed"
+    assert fetched.last_synced_at is None
+
+
+def test_get_feed_subscription_by_url_returns_none_when_missing(tmp_path: Path) -> None:
+    db_path = tmp_path / "test.db"
+
+    assert sqlite_store.get_feed_subscription_by_url("https://nope.example.com", db_path=db_path) is None
+
+
+def test_list_feed_subscriptions_orders_by_added_at(tmp_path: Path) -> None:
+    db_path = tmp_path / "test.db"
+    feed_a = FeedSubscription(id="feed-a", url="https://a.example.com/rss.xml", name="A")
+    feed_b = FeedSubscription(id="feed-b", url="https://b.example.com/rss.xml", name="B")
+    sqlite_store.insert_feed_subscription(feed_a, db_path=db_path)
+    sqlite_store.insert_feed_subscription(feed_b, db_path=db_path)
+
+    subscriptions = sqlite_store.list_feed_subscriptions(db_path=db_path)
+
+    assert [s.id for s in subscriptions] == ["feed-a", "feed-b"]
+
+
+def test_update_feed_last_synced(tmp_path: Path) -> None:
+    db_path = tmp_path / "test.db"
+    feed = FeedSubscription(id="feed-1", url="https://example.com/rss.xml", name="Example Feed")
+    sqlite_store.insert_feed_subscription(feed, db_path=db_path)
+    synced_at = datetime(2026, 7, 12, 9, 0, tzinfo=timezone.utc)
+
+    sqlite_store.update_feed_last_synced("https://example.com/rss.xml", synced_at, db_path=db_path)
+
+    fetched = sqlite_store.get_feed_subscription_by_url("https://example.com/rss.xml", db_path=db_path)
+    assert fetched.last_synced_at == synced_at
+
+
+def test_delete_feed_subscription(tmp_path: Path) -> None:
+    db_path = tmp_path / "test.db"
+    feed = FeedSubscription(id="feed-1", url="https://example.com/rss.xml", name="Example Feed")
+    sqlite_store.insert_feed_subscription(feed, db_path=db_path)
+
+    sqlite_store.delete_feed_subscription("https://example.com/rss.xml", db_path=db_path)
+
+    assert sqlite_store.get_feed_subscription_by_url("https://example.com/rss.xml", db_path=db_path) is None

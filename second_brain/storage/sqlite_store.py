@@ -8,7 +8,7 @@ from datetime import datetime
 from pathlib import Path
 
 from second_brain.config import SQLITE_PATH, ensure_data_dir
-from second_brain.models import Chunk, Document, DocumentSummary
+from second_brain.models import Chunk, Document, DocumentSummary, FeedSubscription
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS documents (
@@ -27,6 +27,14 @@ CREATE TABLE IF NOT EXISTS chunks (
     chunk_index INTEGER NOT NULL,
     content TEXT NOT NULL,
     metadata TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS feeds (
+    id TEXT PRIMARY KEY,
+    url TEXT NOT NULL UNIQUE,
+    name TEXT NOT NULL,
+    added_at TEXT NOT NULL,
+    last_synced_at TEXT
 );
 """
 
@@ -180,5 +188,76 @@ def delete_all_documents(db_path: Path | None = None) -> None:
         with conn:
             conn.execute("DELETE FROM chunks")
             conn.execute("DELETE FROM documents")
+    finally:
+        conn.close()
+
+
+def _row_to_feed_subscription(row: tuple) -> FeedSubscription:
+    feed_id, url, name, added_at, last_synced_at = row
+    return FeedSubscription(
+        id=feed_id,
+        url=url,
+        name=name,
+        added_at=datetime.fromisoformat(added_at),
+        last_synced_at=datetime.fromisoformat(last_synced_at) if last_synced_at else None,
+    )
+
+
+def insert_feed_subscription(feed: FeedSubscription, db_path: Path | None = None) -> None:
+    conn = _connect(db_path)
+    try:
+        with conn:
+            conn.execute(
+                "INSERT INTO feeds (id, url, name, added_at, last_synced_at) VALUES (?, ?, ?, ?, ?)",
+                (
+                    feed.id,
+                    feed.url,
+                    feed.name,
+                    feed.added_at.isoformat(),
+                    feed.last_synced_at.isoformat() if feed.last_synced_at else None,
+                ),
+            )
+    finally:
+        conn.close()
+
+
+def get_feed_subscription_by_url(url: str, db_path: Path | None = None) -> FeedSubscription | None:
+    conn = _connect(db_path)
+    try:
+        row = conn.execute(
+            "SELECT id, url, name, added_at, last_synced_at FROM feeds WHERE url = ?", (url,)
+        ).fetchone()
+    finally:
+        conn.close()
+
+    return None if row is None else _row_to_feed_subscription(row)
+
+
+def list_feed_subscriptions(db_path: Path | None = None) -> list[FeedSubscription]:
+    conn = _connect(db_path)
+    try:
+        rows = conn.execute(
+            "SELECT id, url, name, added_at, last_synced_at FROM feeds ORDER BY added_at"
+        ).fetchall()
+    finally:
+        conn.close()
+
+    return [_row_to_feed_subscription(row) for row in rows]
+
+
+def update_feed_last_synced(url: str, synced_at: datetime, db_path: Path | None = None) -> None:
+    conn = _connect(db_path)
+    try:
+        with conn:
+            conn.execute("UPDATE feeds SET last_synced_at = ? WHERE url = ?", (synced_at.isoformat(), url))
+    finally:
+        conn.close()
+
+
+def delete_feed_subscription(url: str, db_path: Path | None = None) -> None:
+    conn = _connect(db_path)
+    try:
+        with conn:
+            conn.execute("DELETE FROM feeds WHERE url = ?", (url,))
     finally:
         conn.close()

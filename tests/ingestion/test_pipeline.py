@@ -2,11 +2,33 @@ from pathlib import Path
 
 import pytest
 
-from second_brain.ingestion.pipeline import ingest_document
-from second_brain.models import Document
+from second_brain.ingestion.pipeline import (
+    ingest_document,
+    sync_all_feed_subscriptions,
+    sync_feed_subscription,
+)
+from second_brain.models import Document, FeedSubscription
 from second_brain.processing import embedding as embedding_module
 from second_brain.processing.embedding import EmbeddingProvider
-from second_brain.storage import list_documents, sqlite_store, vector_store
+from second_brain.storage import list_documents, sqlite_store, subscribe_feed, vector_store
+
+_RSS_FEED = """<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+  <channel>
+    <title>Test Feed</title>
+    <item>
+      <title>第一篇文章</title>
+      <link>https://example.com/posts/1</link>
+      <description>資料庫 索引 查詢內容。</description>
+    </item>
+    <item>
+      <title>第二篇文章</title>
+      <link>https://example.com/posts/2</link>
+      <description>第二篇的內容。</description>
+    </item>
+  </channel>
+</rss>
+"""
 
 
 class _FakeEmbeddingProvider(EmbeddingProvider):
@@ -62,3 +84,53 @@ def test_ingest_document_detects_rename_when_content_matches_different_path() ->
     assert result.status == "renamed"
     assert result.previous_source_path == "/old/note.md"
     assert len(list_documents()) == 1
+
+
+def test_sync_feed_subscription_ingests_all_entries() -> None:
+    feed = FeedSubscription(id="feed-1", url=_RSS_FEED, name="Test Feed")
+
+    result = sync_feed_subscription(feed)
+
+    assert result.error is None
+    assert result.added == 2
+    assert result.updated == 0
+    assert result.skipped == 0
+    assert len(list_documents()) == 2
+
+
+def test_sync_feed_subscription_updates_last_synced_at() -> None:
+    subscribe_feed(_RSS_FEED, "Test Feed")
+    feed = sqlite_store.get_feed_subscription_by_url(_RSS_FEED)
+
+    sync_feed_subscription(feed)
+
+    refreshed = sqlite_store.get_feed_subscription_by_url(_RSS_FEED)
+    assert refreshed.last_synced_at is not None
+
+
+def test_sync_feed_subscription_reingesting_reports_updates() -> None:
+    feed = FeedSubscription(id="feed-1", url=_RSS_FEED, name="Test Feed")
+    sync_feed_subscription(feed)
+
+    result = sync_feed_subscription(feed)
+
+    assert result.added == 0
+    assert result.updated == 2
+
+
+def test_sync_feed_subscription_reports_error_without_raising() -> None:
+    feed = FeedSubscription(id="feed-1", url="this is not a feed at all", name="Broken Feed")
+
+    result = sync_feed_subscription(feed)
+
+    assert result.error is not None
+    assert result.added == 0
+
+
+def test_sync_all_feed_subscriptions_syncs_every_subscription() -> None:
+    subscribe_feed(_RSS_FEED, "Test Feed")
+
+    results = sync_all_feed_subscriptions()
+
+    assert len(results) == 1
+    assert results[0].added == 2

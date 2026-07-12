@@ -9,11 +9,17 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Literal
 
-from second_brain.models import Document
+from second_brain.ingestion.rss_loader import load_feed
+from second_brain.models import Document, FeedSubscription
 from second_brain.processing.chunking import chunk_document
 from second_brain.processing.embedding import get_embedding_provider
 from second_brain.processing.tagging import get_tagging_provider
-from second_brain.storage import replace_existing_document, save_document
+from second_brain.storage import (
+    list_feed_subscriptions,
+    mark_feed_synced,
+    replace_existing_document,
+    save_document,
+)
 
 
 @dataclass
@@ -57,3 +63,42 @@ def ingest_document(document: Document) -> IngestResult | None:
         status=status,
         previous_source_path=previous_source_path,
     )
+
+
+@dataclass
+class FeedSyncResult:
+    feed: FeedSubscription
+    added: int
+    updated: int
+    skipped: int
+    error: str | None = None
+
+
+def sync_feed_subscription(feed: FeedSubscription, limit: int | None = None) -> FeedSyncResult:
+    """抓一個訂閱來源目前的文章,逐篇跑 `ingest_document()`,再更新 last_synced_at。
+
+    抓取/解析失敗不會拋例外,包進 `FeedSyncResult.error` 讓呼叫端(CLI)自己決定
+    要不要繼續處理其他訂閱來源——`sync_all_feed_subscriptions()` 就是靠這個
+    設計,讓一個來源壞掉不會擋住其他來源的同步。
+    """
+    try:
+        documents = load_feed(feed.url, limit=limit)
+    except Exception as error:
+        return FeedSyncResult(feed=feed, added=0, updated=0, skipped=0, error=str(error))
+
+    added = updated = skipped = 0
+    for document in documents:
+        result = ingest_document(document)
+        if result is None:
+            skipped += 1
+        elif result.status == "added":
+            added += 1
+        else:
+            updated += 1
+
+    mark_feed_synced(feed.url)
+    return FeedSyncResult(feed=feed, added=added, updated=updated, skipped=skipped)
+
+
+def sync_all_feed_subscriptions(limit: int | None = None) -> list[FeedSyncResult]:
+    return [sync_feed_subscription(feed, limit=limit) for feed in list_feed_subscriptions()]

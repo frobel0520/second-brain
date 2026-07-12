@@ -12,6 +12,8 @@ python -m venv .venv
 
 ./.venv/Scripts/python.exe -m second_brain add path/to/note.md
 ./.venv/Scripts/python.exe -m second_brain add-feed https://example.com/feed.xml
+./.venv/Scripts/python.exe -m second_brain feeds add https://example.com/feed.xml
+./.venv/Scripts/python.exe -m second_brain feeds sync
 ./.venv/Scripts/python.exe -m second_brain search "想搜尋的內容"
 ./.venv/Scripts/python.exe -m second_brain ask "想問的問題"
 ./.venv/Scripts/python.exe -m second_brain list
@@ -49,7 +51,7 @@ second_brain/
 ├── ingestion/        # 資料擷取層 — 讀原始資料 → 轉成 Document
 │   ├── loader.py         # 讀 .md / .txt 檔案
 │   ├── rss_loader.py      # 讀 RSS/Atom 訂閱來源,一篇文章一個 Document
-│   └── pipeline.py        # ingest_document():標籤→切塊→embedding→dedupe→存檔,CLI/網頁共用
+│   └── pipeline.py        # ingest_document():標籤→切塊→embedding→dedupe→存檔,CLI/網頁共用;sync_feed_subscription()/sync_all_feed_subscriptions():同步訂閱清單
 ├── processing/       # 清洗、切塊、embedding、自動標籤
 │   ├── chunking.py       # chunk_text() / chunk_document()
 │   ├── embedding.py      # EmbeddingProvider 抽象介面 + SentenceTransformer 實作
@@ -57,7 +59,7 @@ second_brain/
 ├── storage/          # SQLite + ChromaDB 讀寫封裝
 │   ├── sqlite_store.py   # metadata / 原文 (SQLite)
 │   ├── vector_store.py   # embedding (ChromaDB, persistent, 本機檔案)
-│   └── store.py          # 對外唯一介面: save_document(), search_similar(), list_documents(), replace_existing_document(), remove_document(), clear_all()
+│   └── store.py          # 對外唯一介面: save_document(), search_similar(), list_documents(), replace_existing_document(), remove_document(), clear_all(), subscribe_feed(), unsubscribe_feed(), list_feed_subscriptions(), mark_feed_synced()
 ├── retrieval/         # 語意搜尋、RAG 問答
 │   ├── search.py         # search(): query 轉 embedding → search_similar()
 │   └── ask.py            # ask(): search() 結果組 context → 呼叫 Anthropic API 做問答
@@ -73,6 +75,7 @@ second_brain/
 - `add` 對同一份筆記是 upsert 語意:再次 add 會刪掉舊版本(sqlite + chroma)再存新的,不會重複塞入。判斷「同一份筆記」的邏輯:先比對 `source_path`(內容改了但路徑沒變),找不到再比對 `content` 是否完全相同(路徑變了但內容沒變 —— 例如檔案改名/搬家)
 - `TaggingProvider` 也是抽象介面,之後要換成 LLM 或規則式分類只需新增一個實作;`add` 時會自動呼叫,把標籤存進 `Document.tags`
 - `add` 跟 `add-feed` 共用同一套「標籤 → 切塊 → embedding → 存檔」邏輯(`ingestion/pipeline.py:ingest_document()`),加新的 ingestion 來源或新的 interface(CLI、網頁)只要能產生 `Document`,就自動有標籤/dedupe/embedding,不用重寫這段
+- **feed 訂閱清單**(`feeds` 指令組)跟一次性的 `add-feed` 是分開的功能:`add-feed` 抓一次就忘記,`feeds add` 會把來源記進 SQLite 的 `feeds` 表,之後可以用 `feeds sync` 一次同步所有訂閱來源。同步邏輯(`ingestion/pipeline.py:sync_feed_subscription()`)內部還是呼叫 `load_feed()` + `ingest_document()`,不重寫抓取/dedupe 邏輯
 - `interface/` 底下的 `cli.py` 跟 `web.py` 是同一組核心邏輯的兩種操作介面,兩者都不直接碰 SQLite/ChromaDB,一律透過 `storage`/`retrieval`/`ingestion.pipeline` 的介面
 
 資料預設存在 `data/`(已 gitignore):
@@ -84,11 +87,15 @@ second_brain/
 | 指令 | 狀態 | 說明 |
 |---|---|---|
 | `second-brain add <file_path>` | ✅ 已實作 | 讀取 markdown/text 檔案 → 自動標籤 → 切塊 → 產生 embedding → 存進 SQLite + ChromaDB |
-| `second-brain add-feed <feed_url> [--limit/-n N]` | ✅ 已實作 | 抓取 RSS/Atom 訂閱來源,每篇文章當一份筆記加入知識庫(預設最多 10 篇) |
+| `second-brain add-feed <feed_url> [--limit/-n N]` | ✅ 已實作 | 一次性抓取 RSS/Atom 來源,每篇文章當一份筆記加入知識庫(預設最多 10 篇),不會記住這個來源 |
+| `second-brain feeds add <feed_url> [--name] [--limit/-n N]` | ✅ 已實作 | 把來源加進訂閱清單並立刻同步一次;名稱不給的話會嘗試抓 feed 標題,抓不到就用網址本身 |
+| `second-brain feeds list` | ✅ 已實作 | 列出訂閱清單(名稱、網址、上次同步時間) |
+| `second-brain feeds remove <feed_url>` | ✅ 已實作 | 從訂閱清單移除來源,不會刪除已經加入知識庫的文章 |
+| `second-brain feeds sync [--limit/-n N]` | ✅ 已實作 | 同步訂閱清單裡的所有來源,抓新文章、更新舊文章,一個來源失敗不會擋住其他來源 |
 | `second-brain search "<query>" [--top-k K]` | ✅ 已實作 | 把 query 轉成向量,語意搜尋,回傳最相關的片段(含來源、分數) |
 | `second-brain ask "<query>" [--top-k K]` | ✅ 已實作 | 在 search 結果基礎上用 Anthropic API(`claude-opus-4-8`)做 RAG 問答,需要 `ANTHROPIC_API_KEY` |
 | `second-brain list` | ✅ 已實作 | 列出知識庫裡目前有哪些文件(標題、片段數、來源路徑、標籤) |
-| `second-brain remove <file_path>` | ✅ 已實作 | 從知識庫移除指定檔案的紀錄(sqlite + chroma),不動硬碟上的檔案本身;檔案不用還存在 |
+| `second-brain remove <source>` | ✅ 已實作 | 從知識庫移除指定來源的紀錄(sqlite + chroma),不動硬碟上的檔案本身;本機檔案路徑或 RSS 文章網址都可以,檔案不用還存在 |
 | `second-brain clear [--yes/-y]` | ✅ 已實作 | 清空整個知識庫(sqlite + chroma);預設會互動確認,`--yes` 跳過確認 |
 
 ## 開發

@@ -103,3 +103,41 @@ def test_clear_all_removes_every_document_and_chunk() -> None:
     assert removed_count == 2
     assert store.list_documents() == []
     assert vector_store._get_collection().count() == 0
+
+
+def test_subscribe_feed_creates_new_subscription() -> None:
+    feed = store.subscribe_feed("https://example.com/rss.xml", "Example Feed")
+
+    assert feed is not None
+    assert feed.name == "Example Feed"
+    assert store.list_feed_subscriptions() == [feed]
+
+
+def test_subscribe_feed_returns_none_when_already_subscribed() -> None:
+    store.subscribe_feed("https://example.com/rss.xml", "Example Feed")
+
+    assert store.subscribe_feed("https://example.com/rss.xml", "Example Feed") is None
+    assert len(store.list_feed_subscriptions()) == 1
+
+
+def test_unsubscribe_feed_returns_none_when_not_found() -> None:
+    assert store.unsubscribe_feed("https://nope.example.com") is None
+
+
+def test_unsubscribe_feed_removes_subscription() -> None:
+    store.subscribe_feed("https://example.com/rss.xml", "Example Feed")
+
+    removed = store.unsubscribe_feed("https://example.com/rss.xml")
+
+    assert removed is not None
+    assert removed.name == "Example Feed"
+    assert store.list_feed_subscriptions() == []
+
+
+def test_mark_feed_synced_sets_last_synced_at() -> None:
+    store.subscribe_feed("https://example.com/rss.xml", "Example Feed")
+
+    store.mark_feed_synced("https://example.com/rss.xml")
+
+    subscriptions = store.list_feed_subscriptions()
+    assert subscriptions[0].last_synced_at is not None
