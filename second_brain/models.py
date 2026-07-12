@@ -42,3 +42,12 @@ class DocumentSummary:
     created_at: datetime
     chunk_count: int
     tags: list[str] = field(default_factory=list)
+
+
+@dataclass
+class FeedSubscription:
+    id: str
+    url: str
+    name: str
+    added_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    last_synced_at: datetime | None = None

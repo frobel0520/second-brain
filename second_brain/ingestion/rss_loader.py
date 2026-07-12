@@ -28,6 +28,15 @@ def load_feed(feed_url: str, limit: int | None = None) -> list[Document]:
     return [_entry_to_document(entry) for entry in entries]
 
 
+def get_feed_title(feed_url: str) -> str | None:
+    """抓 feed 的頻道標題,拿不到就回傳 None(呼叫端可以退回用網址本身當名稱)。"""
+    import feedparser
+
+    parsed = feedparser.parse(feed_url)
+    title = parsed.feed.get("title")
+    return title.strip() if title else None
+
+
 def _entry_to_document(entry: Any) -> Document:
     link = entry.get("link") or entry.get("id") or str(uuid.uuid4())
     title = entry.get("title", "").strip() or link

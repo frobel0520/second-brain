@@ -1,6 +1,6 @@
 import pytest
 
-from second_brain.ingestion.rss_loader import load_feed
+from second_brain.ingestion.rss_loader import get_feed_title, load_feed
 
 _RSS_FEED = """<?xml version="1.0" encoding="UTF-8"?>
 <rss version="2.0">
@@ -55,3 +55,11 @@ def test_load_feed_respects_limit() -> None:
 def test_load_feed_raises_for_unparseable_source() -> None:
     with pytest.raises(ValueError):
         load_feed("this is not a feed at all")
+
+
+def test_get_feed_title_returns_channel_title() -> None:
+    assert get_feed_title(_RSS_FEED) == "Test Feed"
+
+
+def test_get_feed_title_returns_none_for_unparseable_source() -> None:
+    assert get_feed_title("this is not a feed at all") is None

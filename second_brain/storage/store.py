@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
-from second_brain.models import Chunk, Document, DocumentSummary, SearchResult
+import uuid
+from datetime import datetime, timezone
+
+from second_brain.models import Chunk, Document, DocumentSummary, FeedSubscription, SearchResult
 from second_brain.storage import sqlite_store, vector_store
 
 
@@ -90,3 +93,31 @@ def search_similar(query_embedding: list[float], top_k: int = 5) -> list[SearchR
         )
 
     return results
+
+
+def subscribe_feed(url: str, name: str) -> FeedSubscription | None:
+    """把一個 RSS/Atom 來源加進訂閱清單。同一個網址已經訂閱過就回傳 None。"""
+    if sqlite_store.get_feed_subscription_by_url(url) is not None:
+        return None
+
+    feed = FeedSubscription(id=str(uuid.uuid4()), url=url, name=name)
+    sqlite_store.insert_feed_subscription(feed)
+    return feed
+
+
+def list_feed_subscriptions() -> list[FeedSubscription]:
+    return sqlite_store.list_feed_subscriptions()
+
+
+def unsubscribe_feed(url: str) -> FeedSubscription | None:
+    """取消訂閱指定網址,回傳被移除的訂閱紀錄;找不到就回傳 None。不影響已經 ingest 的文件。"""
+    existing = sqlite_store.get_feed_subscription_by_url(url)
+    if existing is None:
+        return None
+
+    sqlite_store.delete_feed_subscription(url)
+    return existing
+
+
+def mark_feed_synced(url: str) -> None:
+    sqlite_store.update_feed_last_synced(url, datetime.now(timezone.utc))
