@@ -4,7 +4,7 @@
 使用方式看 [README.md](README.md),規劃看 [CLAUDE.md](CLAUDE.md)。這份只記錄
 「現在做到哪、為什麼這樣做、接下來大概要做什麼」,每次做完一個階段性任務就更新。
 
-最後更新:2026-07-12(第十四輪,整理待辦清單 + 排程細節問答)
+最後更新:2026-07-12(第十五輪,網頁介面細節打磨)
 
 ## 現況一句話
 
@@ -17,6 +17,16 @@ CLAUDE.md 的 MVP 加上這些都做完了:`list`/`remove`/`clear`/`add-feed`/�
 Windows 排程工作每天早上 8 點自動跑一次,已 commit 進 `f846938` 並 push,
 見下面專節)。**CLAUDE.md 原本把「自動化排程」明確排除在 MVP 範圍外,這次
 是使用者主動要求才做,不是我自己決定跨出範圍。**
+
+**第十五輪:網頁介面細節打磨**,問過使用者候選清單裡具體要做哪幾項(不是
+全部做),選了三個:(1) 「新增筆記」加完文件後自動跳轉到「瀏覽」分頁;
+(2) 「瀏覽」分頁加文件列表分頁(pagination,一頁 20 篇);(3) 「訂閱管理」
+分頁「同步全部」的失敗提示改成折疊區塊,不是每個來源印一則訊息洗版。
+**技術前提是把導覽從 `st.tabs()` 換成 `st.segmented_control()`**,因為
+`st.tabs()` 沒辦法用程式碼切換分頁,細節見下面「網頁介面細節打磨」專節。
+**三項都用 Claude Browser pane 實際操作過網頁介面驗證,包含手動訂閱一個
+故意失效的網址來驗證失敗折疊區塊真的正確顯示,不是只看程式碼合理就結案**,
+驗證完有把測試用的失效訂閱清乾淨。**第十五輪的程式碼還沒 commit**。
 
 **第十四輪沒有改程式碼**,做了兩件事:(1) 使用者問排程工作在「電腦當天
 是關機狀態」跟「會不會用到 API token」這兩個問題,細節見下面「`feeds
@@ -165,6 +175,14 @@ RSS,列出來讓使用者選,使用者選**全部訂閱**:**iThome**
   - 用 `@st.cache_resource` 包一個 `_warm_up_providers()`,頁面第一次載入就把 embedding/tagging 模型準備好,避免 Streamlit 每次互動重跑整支 script 時反覆重新載入模型
   - **沒有網頁版的 `clear`**:清空整個知識庫這種危險操作刻意只留在 CLI,網頁介面不放
   - **圖示是 📚(書本),不是 🧠**:使用者說想要「知識庫的感覺,不要大腦的圖」換的,這批上一輪已經 commit 進 `a6d4cc1`。
+  - **第十五輪:分頁導覽從 `st.tabs()` 改成 `st.segmented_control()`**:原因是 `st.tabs()` 沒有公開 API 可以用程式碼切換到指定分頁,`st.segmented_control()`(Streamlit 1.37+,這個專案裝的是 1.59.1)可以透過 `key` 綁定 `st.session_state`,在 widget 建立**之前**先蓋掉 `st.session_state["active_tab"]` 的值再 `st.rerun()`,下一次執行時 widget 就會用新的值渲染,達到「跳轉到指定分頁」的效果——這是這輪要做「新增後自動跳轉」的必要前提,不是隨意換元件。整個檔案結構也從 `tab_x = st.tabs(...); with tab_x:` 改成 `active_tab = st.segmented_control(...); if active_tab == "x": ...`,五個分頁的內容邏輯本身沒有任何改變,純粹是外層容器換掉。**`segmented_control` 允許再點一次目前選中的選項讓它變成「沒有選取」(回傳 `None`)**,程式碼多加了 `if active_tab is None: active_tab = "瀏覽"` 防呆,不然會整頁空白。
+
+**網頁介面細節打磨(第十五輪)**:候選清單裡列了三個小項,問過使用者要做哪幾個(不是全部一次做完),使用者選了以下三項:
+  - **「新增筆記」加完之後自動跳轉到「瀏覽」分頁**:上傳檔案或一次性抓 RSS,只要至少有一篇成功處理(`added > 0`),就把結果訊息存進 `st.session_state["add_note_message"]`、把 `st.session_state["nav_target"]` 設成「瀏覽」,再 `st.rerun()`;腳本最上方(畫導覽列之前)把 `nav_target` 套用到 `active_tab`,「瀏覽」分頁最上面則檢查 `add_note_message` 印出來(跟既有的 `batch_delete_message`/`batch_category_message` 用同一套「訊息存 session_state、下個分頁載入時彈出來顯示」的既有慣例,沒有另外發明新機制)。**如果全部文件都是空內容被略過(`added == 0`)則不跳轉**,原地顯示「完成:0 篇已處理...」,因為沒有新東西可以去瀏覽分頁看。
+  - **「瀏覽」分頁加文件列表分頁(pagination)**:`_BROWSE_PAGE_SIZE = 20`,用 `st.number_input` 讓使用者輸入頁碼,`math.ceil(len(documents) / 20)` 算總頁數,對 `documents` list 做切片。**切換分類篩選時會把頁碼重設回第一頁**:偵測 `browse-category-filter` 這次的值跟上次記錄的值(`browse-category-prev`)是否不同,不同就把 `browse-page` 重設成 1——這是必要的防呆,不然「篩選後文件變少,但頁碼還停在篩選前的較大頁數」會讓 `st.number_input` 的 `max_value` 跟已存的 session_state 值互相打架。**已知的（可以接受的）行為**:手動測試時發現,切到別的分頁(例如「搜尋」)再切回「瀏覽」,頁碼也會重置回第一頁,即使分類篩選沒有變——推測是 Streamlit 對「這次腳本執行沒有被實例化的 widget」在下次重新出現時,不一定會保留舊的 session_state 值(這輪沒有深入查證 Streamlit 內部確切機制,只確認了現象),但這不在使用者要求的範圍內(沒有人要求切分頁要記住頁碼),不特地修。
+  - **「同步全部」的失敗提示分組**:原本 9 個來源全部同步完會列出 9 則 `st.success`/`st.error`,畫面很長。改成:成功的來源全部彙總成一行(`f"{len(successes)} 個來源同步成功 — 共新增 {total_added} 篇、更新 {total_updated} 篇。"`),失敗的來源用 `st.expander(f"⚠️ {len(failures)} 個來源同步失敗", expanded=True)` 包起來(預設展開,因為失敗需要立刻被注意到,不是隨便找個地方藏起來),裡面才逐一列出每個失敗來源的名稱+原因。**手動測試時真的訂閱一個故意失效的網址(`https://this-is-not-a-real-feed-url-12345.invalid/rss.xml`)驗證過失敗折疊區塊會正確顯示**(「⚠️ 1 個來源同步失敗」+ 展開後看到「測試失效來源:無法解析這個 RSS/Atom 來源」),不是只看程式碼邏輯合理就假設沒問題,驗證完馬上用 `feeds remove` 把這個測試訂閱清掉,沒有留在真實知識庫裡。
+  - **三項都用 Claude Browser pane 實際跑過 Streamlit 網頁介面驗證,不是只看程式碼**:自動跳轉用真的上傳/抓 RSS 測過、跳轉後訊息確實出現在瀏覽分頁,且用 JS 查證 `segmented_control` 的 `aria-checked` 真的切到「瀏覽」;分頁用真的點頁碼增減鈕測過,文件內容確實隨頁碼變化;失敗分組如上所述用真的失效網址測過。
+  - **這輪沒有選的候選,還留著沒做**:批次刪除/設定分類的「預覽符合的文件」清單切換分頁不會自動更新,這個不在這次要打磨的範圍裡。
 
 **一鍵啟動網頁介面**(使用者要求「在專案資料夾那邊就可以跑,或者有個本機捷徑」):
   - [run_web.bat](run_web.bat):放在專案根目錄,雙擊就會 `cd` 到自己所在的目錄再跑 `streamlit run`,不用先手動開終端機/`cd`。
@@ -226,12 +244,11 @@ RSS,列出來讓使用者選,使用者選**全部訂閱**:**iThome**
 - `search`/`ask` 目前**不會**顯示文件的標籤,只有 `add`/`add-feed` 完成訊息跟 `list` 會顯示。
 - 沒有針對標籤的操作(例如按標籤過濾 `list`/`search`),純粹先把資料存起來。
 - `add-feed` 的 HTML 去標籤是陽春正則,不是完整 HTML parser(見上面決策說明);`<script>`/`<style>` 內容不會被排除。
-- **網頁介面的「訂閱管理」分頁沒有「同步全部」的個別失敗提示分組**:`sync_all_feed_subscriptions()` 回傳的每個結果都各印一則 `st.success`/`st.error`,來源一多畫面會變得很長,沒有摺疊/分組。對個人用途的訂閱數量應該還好,先不處理。
 - **`feeds sync` 是依序同步,不是平行處理**:訂閱來源一多、其中有網路慢的來源,`sync_all_feed_subscriptions()` 會依序等每個來源做完才處理下一個,沒有做並行抓取。對個人用途的訂閱數量(大概幾個到十幾個)應該還好,但沒有實測過同步大量來源時的耗時。
-- **`feeds add`/`feeds sync` 沒有記錄「這次同步抓到幾篇新文章、幾篇失敗」的歷史**,只有 `last_synced_at` 一個時間戳,沒有同步紀錄/log,沒辦法回頭查「上次同步到底發生了什麼」。
+- **`feeds add`/`feeds sync` 沒有記錄「這次同步抓到幾篇新文章、幾篇失敗」的歷史**,只有 `last_synced_at` 一個時間戳跟(第十三輪加的)`data/sync.log` 彙總結果,沒有逐次的詳細紀錄,沒辦法回頭查「上次同步到底發生了什麼細節」。
 - **Streamlit 網頁介面沒有 `clear`**(刻意的,見上面決策說明),要清空知識庫還是得用 CLI。
-- **網頁介面的「新增筆記」完成後不會自動導去「瀏覽」分頁**,使用者要自己點過去才看得到剛加的東西(見上面決策說明)。
-- **網頁介面目前沒有針對大量文件的分頁/捲動優化**,跟 CLI 的 `list` 一樣是先求能動,文件一多畫面會變長。
+- **第十五輪:網頁介面「瀏覽」分頁切換分頁籤(例如切去「搜尋」)再切回「瀏覽」,文件列表的頁碼會重置回第一頁**,即使分類篩選沒變。細節、猜測原因見上面「網頁介面細節打磨」決策說明,這輪沒有深入查證 Streamlit 內部機制,判斷這不影響核心功能、也不在使用者這輪要求的範圍內,先不修。
+- **第十五輪:批次刪除/批次設定分類的「預覽符合的文件」清單不會自動更新這個既有限制(第五輪就記錄過,見下面)沒有變**,這輪打磨網頁介面時有特地問過使用者要做哪幾項,這項沒有被選進來,維持原樣。
 - **`streamlit` 是獨立的 optional dependency**(`pyproject.toml` 的 `[project.optional-dependencies].ui`),裝 `.[dev]` 不會自動裝到,要另外 `pip install -e ".[ui]"` 或 `.[dev,ui]`。
 - **第十輪:分類是自由文字,不是寫死的 enum**,CLI/網頁介面都不會擋你打錯字或打出跟現有分類不一致的新分類(例如手滑打成「財金」而不是「財經」),`list_categories()` 只會忠實反映資料庫裡實際出現過的值,打錯字不會被攔下來,要靠人工發現、用 `set-category` 修正。
 - **第十輪:`feeds set-category` 不會回頭改已經存在的文件**,只影響之後同步進來的新文章;舊文件要嘛靠下次同步時該文章剛好還在 feed 回傳範圍內順便更新,要嘛要另外用 `second-brain set-category` 手動批次改——這是刻意的設計(理由見上面「文件分類」決策說明),但代表**改一個訂閱來源的分類,不會馬上讓瀏覽頁面上這個來源的舊文章分類跟著變**,如果沒讀過決策說明容易誤以為是 bug。
@@ -258,7 +275,7 @@ CLAUDE.md「未來規劃方向」列的:
 
 Hybrid search(關鍵字 + 語意搜尋並用)**第九輪已經做完**,文件分類**第十輪已經做完**,細節都在上面「已經做完的東西」跟「中途做的決策」兩節。
 
-使用者說這些方向都想做,已經照優先順序做完 `remove` → 「更聰明的 dedupe」+「清空知識庫指令」→ 「自動打標籤(殼)」→ 「RSS ingestion」→ 「Streamlit 網頁介面」→「一鍵啟動」→ 「feed 訂閱清單(CLI)」→ 「feed 訂閱清單補進網頁介面」→ 「search/ask 顯示時間 + remove-batch 批次刪除(CLI)」→ 「remove-batch 補進網頁介面」(第五輪)→ 「訂閱真實 RSS 來源」(第六輪)→ 「翻譯成繁體中文 + 時間戳記改 UTC+8」(第七輪)→ 「hybrid search」(第九輪)→ 「訂閱財經 RSS 來源 + 文件分類」(第十輪)→ 「訂閱中文科技 RSS 來源」(第十一輪)→ 「退訂英文科技來源、改訂中文新聞來源」(第十二輪)→ 「`feeds sync` 排程自動化」(第十三輪)。
+使用者說這些方向都想做,已經照優先順序做完 `remove` → 「更聰明的 dedupe」+「清空知識庫指令」→ 「自動打標籤(殼)」→ 「RSS ingestion」→ 「Streamlit 網頁介面」→「一鍵啟動」→ 「feed 訂閱清單(CLI)」→ 「feed 訂閱清單補進網頁介面」→ 「search/ask 顯示時間 + remove-batch 批次刪除(CLI)」→ 「remove-batch 補進網頁介面」(第五輪)→ 「訂閱真實 RSS 來源」(第六輪)→ 「翻譯成繁體中文 + 時間戳記改 UTC+8」(第七輪)→ 「hybrid search」(第九輪)→ 「訂閱財經 RSS 來源 + 文件分類」(第十輪)→ 「訂閱中文科技 RSS 來源」(第十一輪)→ 「退訂英文科技來源、改訂中文新聞來源」(第十二輪)→ 「`feeds sync` 排程自動化」(第十三輪)→ 「網頁介面細節打磨」(第十五輪)。
 
 ## 下一輪要做的事:還沒決定,先問使用者
 
@@ -269,13 +286,13 @@ Hybrid search(關鍵字 + 語意搜尋並用)**第九輪已經做完**,文件分
 候選(不代表優先順序):
 - 更多 ingestion 來源(瀏覽器書籤、Readwise/Instapaper、Obsidian/Notion 匯出)。
 - 關聯筆記推薦、去重複。
-- 網頁介面的細節打磨(新增後自動跳轉、分頁、更明確的操作回饋)——使用者已經開始實際用網頁介面,這些會變得比較有感。
+- 網頁介面細節打磨的其餘部分(第十五輪已做完新增後自動跳轉/文件列表分頁/同步全部失敗分組,還沒做的是批次刪除/批次設定分類的預覽清單不會自動更新)。
 - **舊資料的 `tags` 欄位 migration**:把這次修正之前存進去的 ASCII 跳脫格式標籤轉成 `ensure_ascii=False` 格式,讓 `remove-batch --keyword` 對舊文件的標籤比對也能生效。不急,先重新 `add`/`feeds sync` 一次也能解決,只是比較手動。
 - **分類下拉選單/自動建議**:見上面「已知的粗糙邊界」,網頁介面批次設定分類的地方目前是純文字輸入,容易手滑打錯字;可以考慮換成下拉選單 + 新增選項的組合。
 
 ## 交接檢查清單(接手時建議做的事)
 
-1. `git log --oneline` 確認目前在哪個 commit,`git status --short --branch` 確認有沒有沒 commit 的東西、有沒有 `ahead`/`behind` origin。**這次交接時,第十三輪(`feeds sync` 排程自動化)的程式碼還沒 commit**(第十輪/第九輪已經 commit 進 `f0ef6d6`/`f44d231` 並 push)——`git status` 應該看得到 `second_brain/interface/cli.py` 改過、`tests/interface/test_cli.py` 是新檔案。第十一輪、第十二輪都沒有改任何程式碼(只有訂閱來源異動,資料本身在 `data/` 底下、`.gitignore` 掉了,不會進 git)。`.claude/launch.json` 有改過(加 `autoPort: true`),但這個檔案本來就在 `.gitignore` 裡,不會出現在 `git status`,不用理它。
+1. `git log --oneline` 確認目前在哪個 commit,`git status --short --branch` 確認有沒有沒 commit 的東西、有沒有 `ahead`/`behind` origin。**這次交接時,第十五輪(網頁介面細節打磨)的程式碼還沒 commit**(第十三輪/第十輪/第九輪已經分別 commit 進 `f846938`/`f0ef6d6`/`f44d231` 並 push)——`git status` 應該看得到 `second_brain/interface/web.py` 改過,沒有新檔案。第十一輪、第十二輪、第十四輪都沒有改任何程式碼。`.claude/launch.json` 有改過(加 `autoPort: true`),但這個檔案本來就在 `.gitignore` 裡,不會出現在 `git status`,不用理它。
 2. **這台機器上有一個 Windows 排程工作 `SecondBrainFeedsSync`(第十三輪建的),每天早上 8:00 自動跑 `second-brain feeds sync --log-file data/sync.log`**——這是機器層級設定,不在 git 裡,換一台機器要重新用 `Register-ScheduledTask` 建立(指令見上面「`feeds sync` 排程自動化」決策說明)。想查排程有沒有正常執行,看 `data/sync.log`(每次同步一行,格式:時間戳 + 新增/更新總篇數 + 失敗來源數)或用 `Get-ScheduledTask -TaskName SecondBrainFeedsSync | Get-ScheduledTaskInfo` 查 `LastTaskResult`(0 是成功)。
 3. **知識庫裡現在有真實資料,訂閱來源這輪(第十二輪)大換血過**:科技類是 iThome、TechNews 科技新報、DIGITIMES(第十一輪訂的,原本的 The Verge/Hacker News/Simon Willison's Weblog 這三個英文來源已經在第十二輪退訂並刪除所有文章);財經類是經濟日報、自由時報財經版、Yahoo股市(第十輪);新聞類是中央社(國際)、BBC中文網、ETtoday(第十二輪)。`feeds list` 應該看到這 9 個訂閱、`list` 應該看到 100 多篇文件(排程每天都會跑,篇數會持續變動),全部都已經分類完畢(科技/財經/新聞三類,沒有未分類的)。手動測試/除錯時要小心別誤刪這些真實訂閱或文章(用 `remove-batch`/`clear`/`set-category` 之前務必先 `list`/`feeds list` 確認)。
 4. **這台機器沒有設 `ANTHROPIC_API_KEY`**:`ask`/`translate` 都還沒被使用者實際跑過,`second-brain translate` 目前只驗證過「沒 key 時清楚報錯退出」這條路徑。**翻譯品質不在待辦清單裡追蹤了(使用者第十四輪要求拿掉)**,如果之後真的設了 key、剛好有人想確認翻譯品質,再另外評估,不用主動提醒。
@@ -284,4 +301,4 @@ Hybrid search(關鍵字 + 語意搜尋並用)**第九輪已經做完**,文件分
 7. `pyproject.toml` 這輪陸續加了 `jieba>=0.42`、`feedparser>=6.0`、`streamlit>=1.38`(在 `[project.optional-dependencies].ui`,不在預設 `dev` 裡)、`rank_bm25>=0.2`(第九輪,在預設 `dependencies` 裡,不是 optional),**第十三輪沒有再加新依賴**(排程用 Windows 內建的 Task Scheduler,不需要額外套件),如果是全新環境要記得重新 `pip install -e ".[dev]"`(CLI/測試)跟 `pip install -e ".[ui]"`(網頁介面)
 8. 如果要手動測 `add-feed`/`feeds add` 又不想真的連網,`feedparser.parse()` 吃本機檔案路徑或原始 XML 字串都可以;歷輪已經用多個真實網址(BBC中文網、經濟日報、自由時報財經版、Yahoo股市、iThome、TechNews 科技新報、DIGITIMES、中央社、ETtoday,以及已經退訂的 The Verge/Hacker News/Simon Willison's Weblog)驗證過連網路徑沒問題
 9. 開始功能表有一個「Second Brain」捷徑指向 [run_web.bat](run_web.bat)(這輪在使用者機器上建的,不在 git 裡,取代了原本刪掉的桌面捷徑);如果要驗證雙擊啟動的行為,記得先刪掉 `%USERPROFILE%\.streamlit\credentials.toml` 模擬全新機器,不然「歡迎訊息卡住」那個 bug 修好了沒有根本測不出來
-10. 如果要用瀏覽器自動化測 Streamlit 網頁介面,見「中途做的決策」裡記錄的多筆工具限制筆記(text_input 優先用 `computer` 的 triple_click+type,checkbox 要用 JS 點 `label` 元素,`expander` 沒設 `expanded=True` 會每次 rerun 自動收合,長時間執行的 process 會快取住舊模組、遇到剛加的名稱 `ImportError` 先重啟 process)。**第十輪新增一筆**:如果 `.claude/launch.json` 設定的 `second-brain-web` 這個 server name 剛好被另一個對話 session 佔用同一個 port(8501),`preview_start` 會報衝突——這個設定檔已經加了 `"autoPort": true`,harness 會自動換一個空 port,不用特地處理,只是要注意 `preview_start` 回傳的實際 port 號會變。
+10. 如果要用瀏覽器自動化測 Streamlit 網頁介面,見「中途做的決策」裡記錄的多筆工具限制筆記(text_input 優先用 `computer` 的 triple_click+type,checkbox 要用 JS 點 `label` 元素,`expander` 沒設 `expanded=True` 會每次 rerun 自動收合,長時間執行的 process 會快取住舊模組、遇到剛加的名稱 `ImportError` 先重啟 process)。**第十輪新增一筆**:如果 `.claude/launch.json` 設定的 `second-brain-web` 這個 server name 剛好被另一個對話 session 佔用同一個 port(8501),`preview_start` 會報衝突——這個設定檔已經加了 `"autoPort": true`,harness 會自動換一個空 port,不用特地處理,只是要注意 `preview_start` 回傳的實際 port 號會變。**第十五輪新增一筆**:`st.segmented_control()`(這輪拿來當導覽用)渲染出來是 `role="radio"` 元素,`computer` 的 `left_click` 用 `ref` 點擊有時候不會真的觸發選取(點了但畫面內容沒變、`aria-checked` 也沒變),改用 `javascript_tool` 直接對元素呼叫 `.click()`(用 `textContent` 找到正確的那個 radio 再呼叫)比較可靠,遇到同樣情況可以直接跳過重試 `computer` 點擊、改用 JS 點法省時間。
