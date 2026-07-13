@@ -18,6 +18,7 @@ from second_brain.config import DISPLAY_TIMEZONE
 from second_brain.ingestion.loader import load_document
 from second_brain.ingestion.pipeline import ingest_document, sync_all_feed_subscriptions, sync_feed_subscription
 from second_brain.ingestion.rss_loader import get_feed_title, load_feed
+from second_brain.models import DocumentSummary
 from second_brain.processing.embedding import get_embedding_provider
 from second_brain.processing.tagging import get_tagging_provider
 from second_brain.retrieval.ask import ask as run_ask
@@ -39,7 +40,7 @@ from second_brain.storage import (
 st.set_page_config(page_title="Second Brain", page_icon="📚", layout="wide")
 
 _NAV_OPTIONS = ["瀏覽", "搜尋", "問答", "新增筆記", "訂閱管理"]
-_BROWSE_PAGE_SIZE = 20
+_BROWSE_PAGE_SIZE = 10
 
 
 @st.cache_resource
@@ -92,6 +93,8 @@ if active_tab == "瀏覽":
     documents = (
         list_documents() if browse_category == "全部" else find_documents(category=browse_category)
     )
+    # 瀏覽頁面依加入時間由新到舊排列,最新加入的文章排在最前面。
+    documents = sorted(documents, key=lambda document: document.created_at, reverse=True)
 
     if not documents:
         message = (
@@ -102,24 +105,37 @@ if active_tab == "瀏覽":
         st.info(message)
     else:
         total_pages = max(1, math.ceil(len(documents) / _BROWSE_PAGE_SIZE))
-        col_page, col_page_info = st.columns([1, 3])
-        with col_page:
-            page = st.number_input(
-                "頁數", min_value=1, max_value=total_pages, step=1, key="browse-page"
+
+        # 頁碼存在 session_state,配合上一頁/下一頁的箭頭增減;夾在 1~總頁數之間,
+        # 避免刪文件後總頁數變少、舊頁碼超出範圍。
+        page = min(max(int(st.session_state.get("browse-page", 1)), 1), total_pages)
+        st.session_state["browse-page"] = page
+
+        col_prev, col_info, col_next = st.columns([1, 4, 1])
+        with col_prev:
+            if st.button("←", key="browse-prev", disabled=page <= 1, use_container_width=True):
+                st.session_state["browse-page"] = page - 1
+                st.rerun()
+        with col_info:
+            st.markdown(
+                f"<div style='text-align:center'>第 {page} / {total_pages} 頁"
+                f"(共 {len(documents)} 篇)</div>",
+                unsafe_allow_html=True,
             )
-        with col_page_info:
-            st.caption(f"共 {len(documents)} 篇,第 {page} / {total_pages} 頁")
+        with col_next:
+            if st.button("→", key="browse-next", disabled=page >= total_pages, use_container_width=True):
+                st.session_state["browse-page"] = page + 1
+                st.rerun()
 
         start = (page - 1) * _BROWSE_PAGE_SIZE
         page_documents = documents[start : start + _BROWSE_PAGE_SIZE]
 
-        for document in page_documents:
+        def _render_document_card(document: DocumentSummary) -> None:
             with st.container(border=True):
-                col_info, col_action = st.columns([6, 1])
+                col_info, col_action = st.columns([12, 1])
                 with col_info:
                     st.markdown(
                         f"**{document.title}**"
-                        f"  ·  {document.chunk_count} 個片段"
                         f"  ·  {document.created_at.astimezone(DISPLAY_TIMEZONE):%Y-%m-%d %H:%M}"
                     )
                     if document.category:
@@ -133,9 +149,20 @@ if active_tab == "瀏覽":
                             if full_document is not None and full_document.translated_content:
                                 st.write(full_document.translated_content)
                 with col_action:
-                    if st.button("刪除", key=f"remove-{document.id}"):
+                    if st.button("×", key=f"remove-{document.id}", help="刪除"):
                         remove_document(document.source_path)
                         st.rerun()
+
+        # 一頁 10 筆分左右兩欄,前 5 筆放左欄、後 5 筆放右欄。
+        half = math.ceil(_BROWSE_PAGE_SIZE / 2)
+        left_col, right_col = st.columns(2)
+        for column, column_documents in (
+            (left_col, page_documents[:half]),
+            (right_col, page_documents[half:]),
+        ):
+            with column:
+                for document in column_documents:
+                    _render_document_card(document)
 
     st.divider()
 
@@ -260,9 +287,15 @@ if active_tab == "瀏覽":
 elif active_tab == "搜尋":
     query = st.text_input("搜尋知識庫", placeholder="想搜尋的內容")
     top_k = st.slider("回傳筆數", min_value=1, max_value=20, value=5, key="search-top-k")
-    search_category = st.selectbox(
-        "限定分類", options=["全部"] + list_categories(), key="search-category"
-    )
+    col_category, col_sort = st.columns(2)
+    with col_category:
+        search_category = st.selectbox(
+            "限定分類", options=["全部"] + list_categories(), key="search-category"
+        )
+    with col_sort:
+        search_sort = st.selectbox(
+            "排序方式", options=["相關性", "日期(新到舊)"], key="search-sort"
+        )
 
     if query:
         results = run_search(query, top_k=top_k, category=None if search_category == "全部" else search_category)
@@ -270,10 +303,16 @@ elif active_tab == "搜尋":
         if not results:
             st.info("沒有找到相關內容。")
         else:
-            for rank, result in enumerate(results, start=1):
+            # run_search 回傳的順序本來就是依相關度由高到低;選「日期」時才把呈現順序
+            # 改成依加入時間由新到舊,相關度分數在兩種排序下都保留在 score 顯示。
+            if search_sort == "日期(新到舊)":
+                results = sorted(
+                    results, key=lambda result: result.document.created_at, reverse=True
+                )
+            for result in results:
                 with st.container(border=True):
                     created = result.document.created_at.astimezone(DISPLAY_TIMEZONE).strftime("%Y-%m-%d %H:%M")
-                    st.markdown(f"**[{rank}] {result.document.title}**  (score={result.score:.3f}, {created})")
+                    st.markdown(f"**{result.document.title}**  (score={result.score:.3f}, {created})")
                     st.caption(result.document.source_path)
                     st.write(result.chunk.content)
 
