@@ -4,7 +4,7 @@
 使用方式看 [README.md](README.md),規劃看 [CLAUDE.md](CLAUDE.md)。這份只記錄
 「現在做到哪、為什麼這樣做、接下來大概要做什麼」,每次做完一個階段性任務就更新。
 
-最後更新:2026-07-12(第十五輪,網頁介面細節打磨)
+最後更新:2026-07-13(第十六輪,瀏覽/搜尋頁面排序與版面調整)
 
 ## 現況一句話
 
@@ -17,6 +17,30 @@ CLAUDE.md 的 MVP 加上這些都做完了:`list`/`remove`/`clear`/`add-feed`/�
 Windows 排程工作每天早上 8 點自動跑一次,已 commit 進 `f846938` 並 push,
 見下面專節)。**CLAUDE.md 原本把「自動化排程」明確排除在 MVP 範圍外,這次
 是使用者主動要求才做,不是我自己決定跨出範圍。**
+
+**第十六輪:瀏覽/搜尋頁面排序與版面調整**,全部集中在 `second_brain/interface/web.py`,
+使用者一項一項要求,依序做了:(1) 瀏覽頁面改成依加入時間**由新到舊**排序(最新的文章
+排最前面);(2) 瀏覽分頁一頁從 20 筆改成 **10 筆、左右兩欄各 5 筆**;(3) 分頁控制從
+`st.number_input` 換成**箭頭式**(← 第 N/M 頁 →,置中顯示頁碼);(4) 移除每張卡片標題行的
+「N 個片段」;(5) 刪除鍵縮小成小小的「×」圖示(加 `help="刪除"` tooltip)、靠更右上;
+(6) 搜尋頁面加「排序方式」下拉選單,可選**相關性**或**日期(新到舊)**。細節見下面
+「瀏覽/搜尋頁面排序與版面調整」專節。**這輪修掉一個之前埋的問題:搜尋結果本來被寫死
+成永遠依日期排、等於 hybrid search 的相關度排序失效了,這輪把預設改回相關性、日期變成可選。**
+**⚠️ 誠實交代:這輪只做了 `ast.parse` 語法檢查,沒有像第十五輪那樣用 Claude Browser pane
+實際開 Streamlit 點過**——使用者說「先這樣、收工」,沒有要求跑驗證,所以版面/排序的實際
+渲染效果(尤其是欄位巢狀、箭頭 disabled 狀態、× 位置)還沒眼睛看過,下一輪若有機會該補驗證。
+**第十六輪的程式碼還沒 commit**(使用者只說更新 Progress.md 收工,沒有要求 commit),
+交接時 `git status` 會看到 `web.py` 是 modified 未提交狀態。
+**這輪還聊到一個沒有改碼、但之後可能追問的方向**:使用者問「能不能部署到 GitHub Pages」。
+結論是**不行**——GitHub Pages 只託管靜態檔,不會執行 Python;這個專案是要常駐的 Streamlit
+伺服器 + 本機模型 + SQLite/ChromaDB,本質不相容,而且知識庫是個人資料、上公開 Pages 有隱私問題,
+也違背 CLAUDE.md 的 local-first 原則。使用者真正的需求是「**老家的電腦也能用**」,給了三個選項
+(A 老家裝獨立一份 / B 遠端連回主力機 Tailscale / C 雲端 PaaS),**使用者選 A「老家裝獨立一份」**,
+並明確說**資料不用同步、功能能用就好**。所以下一步(如果使用者回來follow-up)就是引導他在老家電腦:
+裝 Python 3.11+ → `git clone https://github.com/frobel0520/second-brain.git` → 建 venv →
+`pip install -e ".[ui]"` →(要問答/翻譯才 `setx ANTHROPIC_API_KEY`)→ `run_web.bat`。**注意 `.gitignore`
+排除了 `data/`,所以 clone 下來是空知識庫(這是對的,不該把個資推上公開 GitHub);第一次啟動要連網
+下載 embedding 模型。這些都只是口頭說明,還沒有真的做任何部署腳本或文件。**
 
 **第十五輪:網頁介面細節打磨**,問過使用者候選清單裡具體要做哪幾項(不是
 全部做),選了三個:(1) 「新增筆記」加完文件後自動跳轉到「瀏覽」分頁;
@@ -167,8 +191,8 @@ RSS,列出來讓使用者選,使用者選**全部訂閱**:**iThome**
   - **這輪已經用真實網址實測過**:`http://feeds.bbci.co.uk/news/world/rss.xml`(BBC News 國際版),`add-feed --limit 5` 抓了 5 篇真實文章,標籤、dedupe(重跑一次變成「已更新」不會重複)、`search` 語意排序全部驗證過在真實英文新聞內容上正常運作。之前「還沒對真實網址測過」這個粗糙邊界已經解決。
 
 **Streamlit 網頁介面**:`second_brain/interface/web.py`,`streamlit run` 啟動,**五個分頁**:
-  - **瀏覽**:列出所有文件(標題/片段數/標籤/來源),每筆有刪除按鈕
-  - **搜尋**:文字框 + 滑桿(top-k),結果卡片顯示分數/來源/片段內容
+  - **瀏覽**:列出所有文件(標題/時間/分類/標籤/來源),每筆右上有小「×」刪除鈕。**第十六輪**改成依加入時間由新到舊、一頁 10 筆左右兩欄各 5 筆、箭頭式分頁,並移除了「片段數」顯示(見下面第十六輪專節)
+  - **搜尋**:文字框 + 滑桿(top-k)+ 限定分類 + **排序方式(相關性/日期新到舊,第十六輪新加)**,結果卡片顯示分數/來源/片段內容
   - **問答**:文字框問問題,沒有 `ANTHROPIC_API_KEY` 會顯示友善錯誤(跟 CLI 的 `ask` 一致)
   - **新增筆記**:上傳本機檔案(存到 temp file 再走 `load_document()`)、或輸入 RSS 網址走 `load_feed()`(一次性,不記住來源)
   - **訂閱管理**(**這輪(第三輪)新加**):列出訂閱清單(名稱/網址/上次同步時間),每筆有「同步」「取消訂閱」按鈕,上面還有一個「同步全部」;下半部是新增訂閱的表單(網址/顯示名稱/首次同步篇數)。CLI 有的 `feeds add/list/remove/sync` 這個分頁全部對應得到,底層呼叫同一組 `storage.subscribe_feed()`/`unsubscribe_feed()`/`list_feed_subscriptions()` + `pipeline.sync_feed_subscription()`/`sync_all_feed_subscriptions()`,不重寫邏輯。
@@ -183,6 +207,15 @@ RSS,列出來讓使用者選,使用者選**全部訂閱**:**iThome**
   - **「同步全部」的失敗提示分組**:原本 9 個來源全部同步完會列出 9 則 `st.success`/`st.error`,畫面很長。改成:成功的來源全部彙總成一行(`f"{len(successes)} 個來源同步成功 — 共新增 {total_added} 篇、更新 {total_updated} 篇。"`),失敗的來源用 `st.expander(f"⚠️ {len(failures)} 個來源同步失敗", expanded=True)` 包起來(預設展開,因為失敗需要立刻被注意到,不是隨便找個地方藏起來),裡面才逐一列出每個失敗來源的名稱+原因。**手動測試時真的訂閱一個故意失效的網址(`https://this-is-not-a-real-feed-url-12345.invalid/rss.xml`)驗證過失敗折疊區塊會正確顯示**(「⚠️ 1 個來源同步失敗」+ 展開後看到「測試失效來源:無法解析這個 RSS/Atom 來源」),不是只看程式碼邏輯合理就假設沒問題,驗證完馬上用 `feeds remove` 把這個測試訂閱清掉,沒有留在真實知識庫裡。
   - **三項都用 Claude Browser pane 實際跑過 Streamlit 網頁介面驗證,不是只看程式碼**:自動跳轉用真的上傳/抓 RSS 測過、跳轉後訊息確實出現在瀏覽分頁,且用 JS 查證 `segmented_control` 的 `aria-checked` 真的切到「瀏覽」;分頁用真的點頁碼增減鈕測過,文件內容確實隨頁碼變化;失敗分組如上所述用真的失效網址測過。
   - **這輪沒有選的候選,還留著沒做**:批次刪除/設定分類的「預覽符合的文件」清單切換分頁不會自動更新,這個不在這次要打磨的範圍裡。
+
+**瀏覽/搜尋頁面排序與版面調整(第十六輪)**:全部只動 `second_brain/interface/web.py`,沒有碰 storage/CLI。
+  - **瀏覽頁面依加入時間由新到舊**:抓完 `list_documents()`/`find_documents()` 之後,在 web 這一層多一行 `sorted(documents, key=lambda d: d.created_at, reverse=True)`。**刻意只改 web 這層,沒動 `sqlite_store.list_documents()`/`find_documents()` 的 `ORDER BY d.created_at`(升冪)**——CLI 的 `list` 指令共用同一組查詢,改 storage 層會連帶改到 CLI 的輸出順序,使用者只要求改網頁瀏覽頁面,所以把排序留在呼叫端、影響面最小。
+  - **一頁 10 筆、左右兩欄各 5 筆**:`_BROWSE_PAGE_SIZE` 從 20 改成 10。卡片渲染抽成 `_render_document_card(document)` 巢狀函式,再用 `half = math.ceil(_BROWSE_PAGE_SIZE / 2)` 把當頁文件切成左欄(前 5)、右欄(後 5),各自 `with st.columns(2)` 的欄位裡渲染。**Streamlit 只允許欄位巢狀一層**:外層 `st.columns(2)` 內再放卡片自己的 `st.columns([12, 1])` 剛好是一層,沒有超過限制。
+  - **箭頭式分頁**:拿掉 `st.number_input`,頁碼改成自己存在 `st.session_state["browse-page"]`,用 `st.columns([1, 4, 1])` 排成「← / 第 N/M 頁(共 X 篇)/ →」,左右各一顆 `st.button`,`disabled` 分別綁 `page <= 1` / `page >= total_pages`,按下就 `session_state ±1` 再 `st.rerun()`。中間頁碼用 `st.markdown(..., unsafe_allow_html=True)` 包 `<div style='text-align:center'>` 置中。**頁碼讀出來時夾在 `1~total_pages` 之間**(`min(max(..., 1), total_pages)`),刪文件讓總頁數變少、或切換分類時不會停在超出範圍的頁碼;原本第十五輪那個「切換分類重設回第 1 頁」的邏輯(偵測 `browse-category-prev`)照舊保留、仍然有效。**這段取代了第十五輪專節裡「用 `st.number_input`、一頁 20 篇」的描述,那部分已經過時。**
+  - **移除「N 個片段」**:卡片標題行從「**標題** · N 個片段 · 時間」改成「**標題** · 時間」,`document.chunk_count` 不再顯示(欄位還在,只是不印)。
+  - **刪除鍵改小「×」+ 靠更右上**:label 從「刪除」改成 `×`、加 `help="刪除"` tooltip,按鈕沒設 `use_container_width` 所以會縮成貼合 `×` 的小尺寸;卡片內欄位比例從 `[6, 1]` 改成 `[12, 1]`,右欄變窄把 `×` 推到更右邊。**垂直方向沒有另外用 CSS 微調**(Streamlit 欄位本來就對齊頂端),使用者說「再靠右上一點點」主要靠調欄寬達成,還沒眼睛驗證實際位置。
+  - **搜尋頁面加排序方式**:原本搜尋結果被寫死成 `sorted(..., created_at, reverse=True)`,等於永遠依日期排、把 `run_search` 的相關度順序蓋掉了(hybrid search 的意義因此失效)。這輪加一個 `st.selectbox("排序方式", ["相關性", "日期(新到舊)"])`(跟「限定分類」用 `st.columns(2)` 並排),**預設「相關性」= 保留 `run_search` 原本由高到低的相關度順序**,選「日期(新到舊)」才 `sorted(created_at, reverse=True)`。兩種排序下 score 分數都照常顯示。
+  - **驗證狀態**:只跑了 `python -c "import ast; ast.parse(...)"` 確認語法過,**沒有開 Streamlit 實際渲染驗證**(使用者要求收工、沒要求驗證)。下一輪若動到這頁,建議補一次 Browser pane 驗證:欄位左右分佈、箭頭在首/末頁的 disabled、× 的實際位置與大小、搜尋排序切換。
 
 **一鍵啟動網頁介面**(使用者要求「在專案資料夾那邊就可以跑,或者有個本機捷徑」):
   - [run_web.bat](run_web.bat):放在專案根目錄,雙擊就會 `cd` 到自己所在的目錄再跑 `streamlit run`,不用先手動開終端機/`cd`。
