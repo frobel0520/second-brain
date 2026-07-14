@@ -140,8 +140,8 @@ if active_tab == "瀏覽":
                     )
                     if document.category:
                         st.caption(f"📁 {document.category}")
-                    if document.tags:
-                        st.caption("🏷️ " + "、".join(document.tags))
+                    # 標籤刻意不顯示給使用者(對閱讀幫助不大),但仍存在 document.tags /
+                    # 後台資料裡,search/hybrid search 也照樣用得到。
                     st.caption(document.source_path)
                     if document.has_translation:
                         with st.expander("🇹🇼 查看繁體中文翻譯"):
