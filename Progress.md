@@ -4,18 +4,34 @@
 使用方式看 [README.md](README.md),規劃看 [CLAUDE.md](CLAUDE.md)。這份只記錄
 「現在做到哪、為什麼這樣做、接下來大概要做什麼」,每次做完一個階段性任務就更新。
 
-最後更新:2026-07-14(第十六輪收尾:瀏覽卡片再拿掉標籤顯示)
+最後更新:2026-07-20(第十七輪:加星保留 + `prune` 自動清理)
 
 ## 現況一句話
 
-CLAUDE.md 的 MVP 加上很多擴充都做完了:**15 個 CLI 指令**(見下面清單)、自動打標籤、
+CLAUDE.md 的 MVP 加上很多擴充都做完了:**18 個 CLI 指令**(見下面清單)、自動打標籤、
 hybrid search、文件分類、RSS 訂閱(CLI+網頁)、**Streamlit 五分頁網頁介面**、一鍵啟動、
-翻譯成繁中、**`feeds sync` 排程自動化**。知識庫有真實資料:**9 個訂閱來源**(科技/財經/
-新聞各 3)、**100+ 篇文件**(排程每天跑,篇數會變動),全部分類完畢、沒有未分類的。
+翻譯成繁中、**`feeds sync` 排程自動化**、**加星保留 + `prune` 自動清理舊文件**。知識庫有
+真實資料:**9 個訂閱來源**(科技/財經/新聞各 3)、**約 420 篇文件**(第 17 輪跑過 `prune` 把
+一週外沒加星的文章刪掉,之後篇數會維持在「最近一週 + 加星文章」的範圍內,不再無限累積),
+全部分類完畢、沒有未分類的。
 **排程自動化 CLAUDE.md 原本明確排除在 MVP 外,是使用者主動要求才做的,不是自己決定跨範圍。**
 
 ## 逐輪變更摘要(新到舊,只留還有效的結論)
 
+- **17**(2026-07-20,commit `2fa9e05`):使用者提議「新聞留一週、加星永久保留」,討論後直接動工
+  (使用者說「直接做」,沒有停在 dry-run)。加三個 CLI 指令:`star <source>` / `unstar <source>`
+  (依來源路徑/網址切換加星狀態)、`prune [--days 7] [-y]`(刪除超過天數、且沒加星的文件,沿用
+  `remove-batch`/`clear` 的預覽+確認機制)。**`documents` 表加 `starred INTEGER NOT NULL DEFAULT 0`
+  欄位**(`_ensure_column` migration,舊資料庫自動補、預設未加星)。`Document`/`DocumentSummary`
+  加 `starred: bool = False`。`find_documents()` 比照 `category` 的模式加 `starred: bool | None`
+  當獨立 AND 條件(疊加在原本的 OR 群組上),`prune` 用
+  `find_documents(created_before=cutoff, starred=False)` 找符合的文件。網頁「瀏覽」卡片先加了
+  星星切換鈕(☆/★),使用者後續要求**拿掉卡片右上角原本的「×」單篇刪除鈕、把 ☆ 移到那個位置**
+  ——現在瀏覽卡片沒有單篇刪除功能了,要刪文件只能用下面的「批次刪除」區塊(`remove_document`
+  import 也跟著移除)。**`prune` 已經實際對真實知識庫執行過**(`--days 7 -y`):刪除 410 篇
+  一週以外、沒加星的文件,知識庫從 830 篇左右降到 **420 篇**,最舊剩下的是 2026-07-14。
+  `prune` **目前沒有接進 `SecondBrainFeedsSync` 排程**,還是純手動指令,要不要自動化留給下一輪
+  使用者決定。補了 9 個測試(118 個全過)。
 - **16**(2026-07-13-14,commit `12da665` + 收尾一筆):瀏覽/搜尋頁面,只動 `web.py`。瀏覽依加入時間
   由新到舊、一頁 10 筆左右兩欄各 5、箭頭式分頁、移除「片段數」、刪除鍵縮成小「×」、
   **瀏覽卡片不再顯示標籤 🏷️**(2026-07-14 補;標籤仍存在 `document.tags`/後台,search 照樣用);
@@ -62,11 +78,11 @@ hybrid search、文件分類、RSS 訂閱(CLI+網頁)、**Streamlit 五分頁網
   jieba 首次會在本機建 prefix dict 快取(純本機、慢零點幾秒)。
 - 常用指令:
   ```bash
-  ./.venv/Scripts/python.exe -m pytest -q                  # ~6 秒,不連網/不用 API,應 109 個全過
+  ./.venv/Scripts/python.exe -m pytest -q                  # ~8 秒,不連網/不用 API,應 118 個全過
   ./.venv/Scripts/python.exe -m second_brain add <file>     # 手動驗證要真的跑一次
   ```
 
-## 15 個 CLI 指令(架構看 [README.md](README.md#架構))
+## 18 個 CLI 指令(架構看 [README.md](README.md#架構))
 
 1. `add <file> [-c 分類]` — md/txt → 自動打標籤 → 切塊 → embedding → 存 SQLite+ChromaDB。
    同一份筆記再 add 會先刪舊版再存(dedupe 見下),不是 append。
@@ -78,20 +94,24 @@ hybrid search、文件分類、RSS 訂閱(CLI+網頁)、**Streamlit 五分頁網
 5. `list [-c 分類]` — 列文件(標題/片段數/來源/標籤),`-c` 時標題前加 `[分類]`。
 6. `remove <source>` — 刪指定來源紀錄(sqlite+chroma),不動硬碟檔。純比對 `source_path`。
    參數是 `source: str`(能刪已從硬碟消失的檔,也能刪 RSS 網址)。
-7. `clear [-y]` — 清空整庫,預設 `typer.confirm()` 確認,`-y` 跳過。不動硬碟原始檔。
-8. `feeds add <url> [--name] [-n N] [-c 分類]` — 加訂閱並立刻同步一次;`--name` 不給會抓 feed
+7. `star <source>` / `unstar <source>`(第 17 輪)— 依來源路徑/網址切換加星狀態,標記
+   永久保留;`prune` 清理時會跳過加星的文件。
+8. `clear [-y]` — 清空整庫,預設 `typer.confirm()` 確認,`-y` 跳過。不動硬碟原始檔。
+9. `feeds add <url> [--name] [-n N] [-c 分類]` — 加訂閱並立刻同步一次;`--name` 不給會抓 feed
    標題、抓不到用網址;重複訂閱同一網址會被拒(exit 1)。內部直接呼叫 `sync_feed_subscription()`。
-9. `feeds list` — 列訂閱(名稱/分類/網址/上次同步時間)。
-10. `feeds remove <url>` — 移除訂閱那一列,**不動**已加入知識庫的文章。
-11. `feeds sync [-n N] [--log-file PATH]` — 同步**所有**訂閱,單一來源失敗不擋其他;凡是這次
+10. `feeds list` — 列訂閱(名稱/分類/網址/上次同步時間)。
+11. `feeds remove <url>` — 移除訂閱那一列,**不動**已加入知識庫的文章。
+12. `feeds sync [-n N] [--log-file PATH]` — 同步**所有**訂閱,單一來源失敗不擋其他;凡是這次
     有抓回來的文章會用該訂閱**目前的分類重新蓋**(只蓋這次抓到的,滾出範圍的舊文不碰)。
     `--log-file` 附加一行彙總結果(給排程用),不給則行為不變。
-12. `feeds set-category <url> <分類>` — 改訂閱分類,只影響**之後**同步進來的新文章。
-13. `remove-batch [--after/--before/--keyword/--source] [-y]` — 批次刪,三條件 **OR**(使用者
+13. `feeds set-category <url> <分類>` — 改訂閱分類,只影響**之後**同步進來的新文章。
+14. `remove-batch [--after/--before/--keyword/--source] [-y]` — 批次刪,三條件 **OR**(使用者
     明確要求),`--after`+`--before` 一起是 AND 區間;**至少要給一個條件**;預覽 + 確認。
-14. `set-category <分類> [同上篩選] [-y]` — 同 remove-batch 的篩選/安全機制,把符合文件的分類
+15. `set-category <分類> [同上篩選] [-y]` — 同 remove-batch 的篩選/安全機制,把符合文件的分類
     設成同一值(補分類用)。
-15. `translate` — 幫還沒翻譯(`translated_content IS NULL`)的文件補繁中翻譯,需 key;認證失敗
+16. `prune [--days 7] [-y]`(第 17 輪)— 刪除超過指定天數、且沒加星的文件;跟 remove-batch/
+    clear 同樣的預覽+確認機制;目前**沒有**接排程,要不要自動跑由使用者決定(見下面第 17 輪)。
+17. `translate` — 幫還沒翻譯(`translated_content IS NULL`)的文件補繁中翻譯,需 key;認證失敗
     直接停並清楚報錯,其他單篇失敗只計數。網頁介面沒有對應功能(批次翻譯久,留在 CLI)。
 
 ## 功能重點(細節/取捨)
@@ -226,12 +246,18 @@ cwd)。**`--log-file` 只寫一行彙總**(`_format_sync_log_line()`:時間戳 +
 - `SEMANTIC_WEIGHT`/`KEYWORD_WEIGHT` 寫死在 `config.py`(各 0.5),沒有讓使用者臨時調整或「只用語意/
   只用關鍵字」的開關(純語意的舊架構還在 git 歷史裡);BM25 語料每次現算沒快取(幾千篇以上會是第一個
   變慢的地方);corpus 極小(1~2 篇)時 idf 可能退化,語意分數會變主要依據(合理降級,非 bug)。
-- `remove-batch` 的 `--after`/`--before` 只吃 `YYYY-MM-DD` 絕對日期,沒有「N 天前」相對簡寫。
+- `remove-batch` 的 `--after`/`--before` 只吃 `YYYY-MM-DD` 絕對日期,沒有「N 天前」相對簡寫
+  (`prune` 的 `--days` 算是這個需求的另一半解法,但只服務「清舊文件」這個特定情境,`remove-batch`
+  本身沒有跟著加相對日期參數,YAGNI)。
+- `prune` 目前是純手動指令,**沒有接上 `SecondBrainFeedsSync` 排程**(見第 17 輪);要自動化
+  的話要另外改 Windows 排程工作的命令列,屬於機器層級設定,不在 git 裡。
 - `streamlit` 是 optional dependency(`[project.optional-dependencies].ui`),`.[dev]` 不會裝到。
 
 ## 接下來(還沒決定,下一輪先問使用者,不要自己選一個就動工)
 
 CLAUDE.md「未來規劃」剩下的 + 這輪浮現的候選:
+- **`prune` 要不要接進 `SecondBrainFeedsSync` 排程**(第 17 輪做出指令但沒接自動化);使用者
+  可能會先手動跑幾次觀察,再決定要不要、以及要設多少天的門檻。
 - 更多 ingestion 來源(瀏覽器書籤、Readwise/Instapaper、Obsidian/Notion 匯出;RSS 已做完)。
 - 自動化處理其餘(關聯筆記推薦、去重複;自動打標籤殼已做完)。
 - **老家電腦部署**(第 16 輪討論,使用者選「裝獨立一份」,可能會 follow-up,步驟見上面第 16 輪摘要)。
@@ -242,17 +268,18 @@ CLAUDE.md「未來規劃」剩下的 + 這輪浮現的候選:
 
 ## 交接檢查清單
 
-1. `git log --oneline` / `git status --short --branch`:**第 16 輪已 commit `12da665`**(15→`e8e1959`、
-   13→`f846938`、10→`f0ef6d6`、9→`f44d231`);11/12/14 沒改碼。工作目錄應乾淨。`.claude/launch.json`
-   改過(`autoPort:true`)但在 `.gitignore` 裡,不會出現在 `git status`。
+1. `git log --oneline` / `git status --short --branch`:**第 17 輪已 commit `2fa9e05`**(16→
+   `12da665`、15→`e8e1959`、13→`f846938`、10→`f0ef6d6`、9→`f44d231`);11/12/14 沒改碼。工作目錄
+   應乾淨。`.claude/launch.json` 改過(`autoPort:true`)但在 `.gitignore` 裡,不會出現在 `git status`。
 2. **機器層級設定,不在 git,換機器要重建**:Windows 排程工作 `SecondBrainFeedsSync`(每天 08:00);
    開始功能表「Second Brain」捷徑;`.streamlit/credentials.toml`。
 3. **知識庫有真實資料,別誤刪**:9 個訂閱(科技=iThome/TechNews/DIGITIMES,財經=經濟日報/自由時報
-   財經/Yahoo股市,新聞=中央社國際/BBC中文網/ETtoday),100+ 篇全部分類完畢。用 `remove-batch`/
+   財經/Yahoo股市,新聞=中央社國際/BBC中文網/ETtoday),約 420 篇全部分類完畢(第 17 輪 `prune`
+   後只留最近一週 + 加星文章)。用 `remove-batch`/
    `clear`/`set-category` 前務必先 `list`/`feeds list` 確認。
 4. **沒設 `ANTHROPIC_API_KEY`**:`ask`/`translate` 沒被實際跑過。翻譯品質不在 TODO 追蹤了(第 14 輪移除)。
    若之後設 key,記得排程會開始自動翻譯花錢(見第 14 輪摘要)。
-5. `pytest -q` 應 109 個全過、~6 秒。
+5. `pytest -q` 應 118 個全過、~8 秒。
 6. 全新環境要 `pip install -e ".[dev]"` + `pip install -e ".[ui]"`。第 13 輪沒加新依賴(排程用 Windows 內建)。
 7. 若驗證雙擊啟動,先刪 `%USERPROFILE%\.streamlit\credentials.toml` 模擬全新機器,否則測不出「Welcome
    卡住」那個 bug 有沒有修好。瀏覽器自動化測 Streamlit 的工具限制見上面「rerun 模型與瀏覽器自動化的坑」。
