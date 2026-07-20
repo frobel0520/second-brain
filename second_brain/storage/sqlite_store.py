@@ -20,7 +20,8 @@ CREATE TABLE IF NOT EXISTS documents (
     metadata TEXT NOT NULL,
     tags TEXT NOT NULL DEFAULT '[]',
     translated_content TEXT,
-    category TEXT
+    category TEXT,
+    starred INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS chunks (
@@ -48,6 +49,7 @@ def _connect(db_path: Path | None = None) -> sqlite3.Connection:
     conn.executescript(_SCHEMA)
     _ensure_column(conn, "documents", "translated_content", "translated_content TEXT")
     _ensure_column(conn, "documents", "category", "category TEXT")
+    _ensure_column(conn, "documents", "starred", "starred INTEGER NOT NULL DEFAULT 0")
     _ensure_column(conn, "feeds", "category", "category TEXT")
     return conn
 
@@ -69,8 +71,8 @@ def insert_document(document: Document, chunks: list[Chunk], db_path: Path | Non
         with conn:
             conn.execute(
                 "INSERT INTO documents "
-                "(id, source_path, title, content, created_at, metadata, tags, translated_content, category) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "(id, source_path, title, content, created_at, metadata, tags, translated_content, category, starred) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     document.id,
                     document.source_path,
@@ -81,6 +83,7 @@ def insert_document(document: Document, chunks: list[Chunk], db_path: Path | Non
                     json.dumps(document.tags, ensure_ascii=False),
                     document.translated_content,
                     document.category,
+                    int(document.starred),
                 ),
             )
             conn.executemany(
@@ -102,7 +105,7 @@ def insert_document(document: Document, chunks: list[Chunk], db_path: Path | Non
 
 
 def _row_to_document(row: tuple) -> Document:
-    doc_id, source_path, title, content, created_at, metadata, tags, translated_content, category = row
+    doc_id, source_path, title, content, created_at, metadata, tags, translated_content, category, starred = row
     return Document(
         id=doc_id,
         source_path=source_path,
@@ -113,10 +116,13 @@ def _row_to_document(row: tuple) -> Document:
         tags=json.loads(tags),
         translated_content=translated_content,
         category=category,
+        starred=bool(starred),
     )
 
 
-_DOCUMENT_COLUMNS = "id, source_path, title, content, created_at, metadata, tags, translated_content, category"
+_DOCUMENT_COLUMNS = (
+    "id, source_path, title, content, created_at, metadata, tags, translated_content, category, starred"
+)
 
 
 def get_document(document_id: str, db_path: Path | None = None) -> Document | None:
@@ -163,7 +169,7 @@ def list_documents(db_path: Path | None = None) -> list[DocumentSummary]:
     try:
         rows = conn.execute(
             "SELECT d.id, d.title, d.source_path, d.created_at, d.tags, COUNT(c.id), "
-            "d.translated_content IS NOT NULL, d.category "
+            "d.translated_content IS NOT NULL, d.category, d.starred "
             "FROM documents d LEFT JOIN chunks c ON c.document_id = d.id "
             "GROUP BY d.id ORDER BY d.created_at"
         ).fetchall()
@@ -180,6 +186,7 @@ def list_documents(db_path: Path | None = None) -> list[DocumentSummary]:
             chunk_count=row[5],
             has_translation=bool(row[6]),
             category=row[7],
+            starred=bool(row[8]),
         )
         for row in rows
     ]
@@ -203,6 +210,15 @@ def update_document_category(document_id: str, category: str | None, db_path: Pa
     try:
         with conn:
             conn.execute("UPDATE documents SET category = ? WHERE id = ?", (category, document_id))
+    finally:
+        conn.close()
+
+
+def set_document_starred(document_id: str, starred: bool, db_path: Path | None = None) -> None:
+    conn = _connect(db_path)
+    try:
+        with conn:
+            conn.execute("UPDATE documents SET starred = ? WHERE id = ?", (int(starred), document_id))
     finally:
         conn.close()
 
@@ -301,16 +317,18 @@ def find_documents(
     keyword: str | None = None,
     source: str | None = None,
     category: str | None = None,
+    starred: bool | None = None,
     db_path: Path | None = None,
 ) -> list[DocumentSummary]:
-    """依日期範圍、關鍵字、來源、分類找文件。
+    """依日期範圍、關鍵字、來源、分類、加星狀態找文件。
 
     日期/關鍵字/來源這三種是「符合任一個就算」(OR),不是同時符合;日期範圍
     (`created_after`/`created_before`)算一組,兩個都給的話彼此是 AND(定義一段
-    區間),這段區間再跟關鍵字/來源用 OR 組合。`category` 則是獨立的 AND 條件,
-    疊加在前面那組 OR 結果之上(例如「分類是財經,而且標題含某關鍵字」)。
-    沒給任何條件(含 category)會回傳空 list,呼叫端應該視為「至少要給一個
-    條件」的錯誤,不要當成「符合全部」處理。
+    區間),這段區間再跟關鍵字/來源用 OR 組合。`category`/`starred` 是獨立的
+    AND 條件,疊加在前面那組 OR 結果之上(例如「分類是財經,而且標題含某關鍵字」;
+    或「未加星,而且是七天前加入的」,用於批次清理)。沒給任何條件(含
+    category/starred)會回傳空 list,呼叫端應該視為「至少要給一個條件」的
+    錯誤,不要當成「符合全部」處理。
     """
     or_conditions: list[str] = []
     params: list[str] = []
@@ -337,18 +355,22 @@ def find_documents(
     where_parts: list[str] = []
     if or_conditions:
         where_parts.append("(" + " OR ".join(or_conditions) + ")")
-    elif category is None:
+    elif category is None and starred is None:
         return []
 
     if category is not None:
         where_parts.append("d.category = ?")
         params.append(category)
 
+    if starred is not None:
+        where_parts.append("d.starred = ?")
+        params.append(int(starred))
+
     conn = _connect(db_path)
     try:
         rows = conn.execute(
             "SELECT d.id, d.title, d.source_path, d.created_at, d.tags, COUNT(c.id), d.category, "
-            "d.translated_content IS NOT NULL "
+            "d.translated_content IS NOT NULL, d.starred "
             "FROM documents d LEFT JOIN chunks c ON c.document_id = d.id "
             f"WHERE {' AND '.join(where_parts)} "
             "GROUP BY d.id ORDER BY d.created_at",
@@ -367,6 +389,7 @@ def find_documents(
             chunk_count=row[5],
             category=row[6],
             has_translation=bool(row[7]),
+            starred=bool(row[8]),
         )
         for row in rows
     ]

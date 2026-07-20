@@ -15,6 +15,7 @@ def find_documents(
     keyword: str | None = None,
     source: str | None = None,
     category: str | None = None,
+    starred: bool | None = None,
 ) -> list[DocumentSummary]:
     return sqlite_store.find_documents(
         created_after=created_after,
@@ -22,6 +23,7 @@ def find_documents(
         keyword=keyword,
         source=source,
         category=category,
+        starred=starred,
     )
 
 
@@ -32,6 +34,20 @@ def list_categories() -> list[str]:
 def set_document_categories(document_ids: list[str], category: str) -> int:
     """把一批文件的分類都設成同一個值,回傳實際更新的筆數。"""
     return sqlite_store.bulk_update_category(document_ids, category)
+
+
+def set_document_starred(document_id: str, starred: bool) -> None:
+    sqlite_store.set_document_starred(document_id, starred)
+
+
+def star_document(source_path: str, starred: bool) -> str | None:
+    """依來源路徑/網址加星或取消加星,回傳文件標題;找不到就回傳 None。"""
+    existing = sqlite_store.get_document_by_source_path(source_path)
+    if existing is None:
+        return None
+
+    sqlite_store.set_document_starred(existing.id, starred)
+    return existing.title
 
 
 def save_document(document: Document, chunks: list[Chunk]) -> None:

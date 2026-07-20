@@ -29,9 +29,9 @@ from second_brain.storage import (
     list_categories,
     list_documents,
     list_feed_subscriptions,
-    remove_document,
     remove_documents,
     set_document_categories,
+    set_document_starred,
     subscribe_feed,
     unsubscribe_feed,
     update_feed_category,
@@ -132,10 +132,11 @@ if active_tab == "瀏覽":
 
         def _render_document_card(document: DocumentSummary) -> None:
             with st.container(border=True):
-                col_info, col_action = st.columns([12, 1])
+                col_info, col_star = st.columns([11, 1])
                 with col_info:
+                    star_prefix = "⭐ " if document.starred else ""
                     st.markdown(
-                        f"**{document.title}**"
+                        f"**{star_prefix}{document.title}**"
                         f"  ·  {document.created_at.astimezone(DISPLAY_TIMEZONE):%Y-%m-%d %H:%M}"
                     )
                     if document.category:
@@ -148,9 +149,10 @@ if active_tab == "瀏覽":
                             full_document = get_document(document.id)
                             if full_document is not None and full_document.translated_content:
                                 st.write(full_document.translated_content)
-                with col_action:
-                    if st.button("×", key=f"remove-{document.id}", help="刪除"):
-                        remove_document(document.source_path)
+                with col_star:
+                    star_help = "取消加星(不再永久保留)" if document.starred else "加星,`prune` 清理時不會刪除"
+                    if st.button("★" if document.starred else "☆", key=f"star-{document.id}", help=star_help):
+                        set_document_starred(document.id, not document.starred)
                         st.rerun()
 
         # 一頁 10 筆分左右兩欄,前 5 筆放左欄、後 5 筆放右欄。
