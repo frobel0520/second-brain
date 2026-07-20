@@ -17,6 +17,7 @@ class Document:
     tags: list[str] = field(default_factory=list)
     translated_content: str | None = None
     category: str | None = None
+    starred: bool = False
 
 
 @dataclass
@@ -46,6 +47,7 @@ class DocumentSummary:
     tags: list[str] = field(default_factory=list)
     has_translation: bool = False
     category: str | None = None
+    starred: bool = False
 
 
 @dataclass

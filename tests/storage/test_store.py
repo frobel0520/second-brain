@@ -325,6 +325,68 @@ def test_update_feed_category_returns_none_when_not_found() -> None:
     assert store.update_feed_category("https://nope.example.com", "科技") is None
 
 
+def test_star_document_returns_none_when_not_found() -> None:
+    assert store.star_document("/tmp/missing.md", True) is None
+
+
+def test_star_document_marks_existing_document_by_source_path() -> None:
+    document, chunks = _document_with_chunk("doc-1", "/tmp/note.md", "筆記")
+    store.save_document(document, chunks)
+
+    title = store.star_document("/tmp/note.md", True)
+
+    assert title == "筆記"
+    assert store.list_documents()[0].starred is True
+
+
+def test_set_document_starred_toggles_by_id() -> None:
+    document, chunks = _document_with_chunk("doc-1", "/tmp/note.md", "筆記")
+    store.save_document(document, chunks)
+
+    store.set_document_starred("doc-1", True)
+    assert store.list_documents()[0].starred is True
+
+    store.set_document_starred("doc-1", False)
+    assert store.list_documents()[0].starred is False
+
+
+def test_find_documents_filters_by_starred_alone() -> None:
+    starred_doc, starred_chunks = _document_with_created_at(
+        "doc-starred", "/tmp/starred.md", "加星筆記", datetime(2026, 1, 1, tzinfo=timezone.utc)
+    )
+    store.save_document(starred_doc, starred_chunks)
+    store.set_document_starred("doc-starred", True)
+
+    plain_doc, plain_chunks = _document_with_created_at(
+        "doc-plain", "/tmp/plain.md", "一般筆記", datetime(2026, 1, 1, tzinfo=timezone.utc)
+    )
+    store.save_document(plain_doc, plain_chunks)
+
+    assert [m.id for m in store.find_documents(starred=True)] == ["doc-starred"]
+    assert [m.id for m in store.find_documents(starred=False)] == ["doc-plain"]
+
+
+def test_find_documents_combines_date_range_with_starred_using_and() -> None:
+    """模擬 `prune` 的用法:超過某個日期、而且沒加星的文件才符合。"""
+    old_unstarred, old_unstarred_chunks = _document_with_created_at(
+        "doc-old-plain", "/tmp/old-plain.md", "舊且沒加星", datetime(2026, 1, 1, tzinfo=timezone.utc)
+    )
+    old_starred, old_starred_chunks = _document_with_created_at(
+        "doc-old-starred", "/tmp/old-starred.md", "舊但加星", datetime(2026, 1, 1, tzinfo=timezone.utc)
+    )
+    new_unstarred, new_unstarred_chunks = _document_with_created_at(
+        "doc-new-plain", "/tmp/new-plain.md", "新且沒加星", datetime(2026, 6, 1, tzinfo=timezone.utc)
+    )
+    store.save_document(old_unstarred, old_unstarred_chunks)
+    store.save_document(old_starred, old_starred_chunks)
+    store.save_document(new_unstarred, new_unstarred_chunks)
+    store.set_document_starred("doc-old-starred", True)
+
+    matches = store.find_documents(created_before=datetime(2026, 2, 1, tzinfo=timezone.utc), starred=False)
+
+    assert [m.id for m in matches] == ["doc-old-plain"]
+
+
 def test_remove_documents_deletes_by_id_and_returns_titles() -> None:
     doc_a, chunks_a = _document_with_created_at(
         "doc-a", "/tmp/a.md", "A", datetime(2026, 1, 1, tzinfo=timezone.utc)

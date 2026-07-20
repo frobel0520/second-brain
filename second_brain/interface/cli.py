@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import sys
-from datetime import datetime, time, timezone
+from datetime import datetime, time, timedelta, timezone
 from pathlib import Path
 
 import anthropic
@@ -30,6 +30,7 @@ from second_brain.storage import (
     remove_document,
     remove_documents,
     set_document_categories,
+    star_document,
     subscribe_feed,
     unsubscribe_feed,
     update_feed_category,
@@ -47,7 +48,7 @@ app.add_typer(feeds_app, name="feeds")
 
 @app.callback()
 def callback() -> None:
-    """add / add-feed / search / ask / list / remove / remove-batch / set-category / clear / translate / feeds 幾組指令,強制保留子指令的形式。"""
+    """add / add-feed / search / ask / list / remove / remove-batch / star / unstar / prune / set-category / clear / translate / feeds 幾組指令,強制保留子指令的形式。"""
 
 
 def _format_ingest_result(result: IngestResult, location: str) -> str:
@@ -334,10 +335,11 @@ def list_command(
     for document in documents:
         created = document.created_at.astimezone(DISPLAY_TIMEZONE).strftime("%Y-%m-%d %H:%M")
         category_prefix = f"[{document.category}] " if document.category else ""
+        star_prefix = "⭐ " if document.starred else ""
         tag_suffix = f"  [{', '.join(document.tags)}]" if document.tags else ""
         translation_suffix = "  🇹🇼已翻譯" if document.has_translation else ""
         typer.echo(
-            f"{created}  {category_prefix}{document.title}  ({document.chunk_count} 個片段)"
+            f"{created}  {star_prefix}{category_prefix}{document.title}  ({document.chunk_count} 個片段)"
             f"{tag_suffix}{translation_suffix}"
         )
         typer.echo(f"    {document.source_path}")
@@ -364,6 +366,40 @@ def remove(
         raise typer.Exit(code=1)
 
     typer.echo(f"已從知識庫移除「{removed_title}」({source})")
+
+
+@app.command()
+def star(
+    source: str = typer.Argument(
+        ..., help="要加星保留的來源——本機檔案路徑或 RSS 文章網址都可以"
+    ),
+) -> None:
+    """幫指定來源的文件加星,標記為永久保留。`prune` 清理舊文件時會跳過加星的文件。"""
+    source_path = source if "://" in source else str(Path(source).resolve())
+    title = star_document(source_path, True)
+
+    if title is None:
+        typer.echo(f"知識庫裡沒有找到這個來源:{source}")
+        raise typer.Exit(code=1)
+
+    typer.echo(f"已幫「{title}」加星({source})")
+
+
+@app.command()
+def unstar(
+    source: str = typer.Argument(
+        ..., help="要取消加星的來源——本機檔案路徑或 RSS 文章網址都可以"
+    ),
+) -> None:
+    """取消指定來源文件的加星狀態。"""
+    source_path = source if "://" in source else str(Path(source).resolve())
+    title = star_document(source_path, False)
+
+    if title is None:
+        typer.echo(f"知識庫裡沒有找到這個來源:{source}")
+        raise typer.Exit(code=1)
+
+    typer.echo(f"已取消「{title}」的加星({source})")
 
 
 def _parse_filter_date(value: str, *, end_of_day: bool) -> datetime:
@@ -468,6 +504,43 @@ def set_category(
 
     updated_count = set_document_categories([document.id for document in matches], category)
     typer.echo(f"已將 {updated_count} 筆文件的分類設成「{category}」。")
+
+
+@app.command()
+def prune(
+    days: int = typer.Option(
+        7, "--days", help="保留最近幾天內加入的文件,更早且沒加星的會被刪除"
+    ),
+    yes: bool = typer.Option(False, "--yes", "-y", help="跳過確認,直接刪除"),
+) -> None:
+    """刪除超過指定天數、且沒有加星的文件,用來自動清掉沒特別想留的舊新聞。
+
+    加星的文件(見 `star`)永遠不會被這個指令刪除,不管多舊。設計給
+    `feeds sync` 排程之後接著跑,把知識庫維持在「最近 N 天 + 手動加星」的
+    範圍。跟 `remove-batch`/`clear` 同樣的預覽 + 確認安全機制。
+    """
+    cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+    matches = find_documents(created_before=cutoff, starred=False)
+
+    if not matches:
+        typer.echo(f"沒有超過 {days} 天、且沒加星的文件。")
+        raise typer.Exit(code=0)
+
+    typer.echo(f"超過 {days} 天且沒加星的文件共 {len(matches)} 筆:")
+    for document in matches:
+        created = document.created_at.astimezone(DISPLAY_TIMEZONE)
+        typer.echo(f"  {created:%Y-%m-%d %H:%M}  {document.title}  ({document.source_path})")
+
+    if not yes:
+        confirmed = typer.confirm(
+            f"確定要刪除這 {len(matches)} 筆文件嗎?這個動作無法復原(加星的文件不受影響)。"
+        )
+        if not confirmed:
+            typer.echo("已取消。")
+            raise typer.Exit(code=0)
+
+    removed_titles = remove_documents([document.id for document in matches])
+    typer.echo(f"已刪除 {len(removed_titles)} 筆文件。")
 
 
 @app.command()

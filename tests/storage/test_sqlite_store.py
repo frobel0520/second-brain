@@ -179,6 +179,55 @@ def test_insert_document_persists_translated_content(tmp_path: Path) -> None:
     assert fetched.translated_content == "你好"
 
 
+def test_insert_document_defaults_to_not_starred(tmp_path: Path) -> None:
+    db_path = tmp_path / "test.db"
+    document = Document(id="doc-1", source_path="/tmp/note.md", title="note", content="hello")
+
+    sqlite_store.insert_document(document, [], db_path=db_path)
+
+    assert sqlite_store.get_document("doc-1", db_path=db_path).starred is False
+
+
+def test_insert_document_persists_starred(tmp_path: Path) -> None:
+    db_path = tmp_path / "test.db"
+    document = Document(id="doc-1", source_path="/tmp/note.md", title="note", content="hello", starred=True)
+
+    sqlite_store.insert_document(document, [], db_path=db_path)
+
+    assert sqlite_store.get_document("doc-1", db_path=db_path).starred is True
+
+
+def test_set_document_starred_updates_existing_document(tmp_path: Path) -> None:
+    db_path = tmp_path / "test.db"
+    document = Document(id="doc-1", source_path="/tmp/note.md", title="note", content="hello")
+    sqlite_store.insert_document(document, [], db_path=db_path)
+
+    sqlite_store.set_document_starred("doc-1", True, db_path=db_path)
+
+    assert sqlite_store.get_document("doc-1", db_path=db_path).starred is True
+
+
+def test_ensure_starred_column_migrates_old_schema(tmp_path: Path) -> None:
+    """模擬「在 starred 欄位存在之前建立的資料庫」,確認 `_connect()` 會自動
+    補上這個欄位並預設為未加星,不需要使用者手動刪掉重建。"""
+    import sqlite3
+
+    db_path = tmp_path / "old.db"
+    conn = sqlite3.connect(db_path)
+    conn.executescript(
+        "CREATE TABLE documents (id TEXT PRIMARY KEY, source_path TEXT NOT NULL, title TEXT NOT NULL, "
+        "content TEXT NOT NULL, created_at TEXT NOT NULL, metadata TEXT NOT NULL, "
+        "tags TEXT NOT NULL DEFAULT '[]');"
+    )
+    conn.close()
+
+    document = Document(id="doc-1", source_path="/tmp/note.md", title="note", content="hello")
+    sqlite_store.insert_document(document, [], db_path=db_path)
+
+    fetched = sqlite_store.get_document("doc-1", db_path=db_path)
+    assert fetched.starred is False
+
+
 def test_insert_document_persists_category(tmp_path: Path) -> None:
     db_path = tmp_path / "test.db"
     document = Document(id="doc-1", source_path="/tmp/note.md", title="note", content="hello", category="財經")
