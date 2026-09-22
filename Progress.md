@@ -4,7 +4,7 @@
 使用方式看 [README.md](README.md),規劃看 [CLAUDE.md](CLAUDE.md)。這份只記錄
 「現在做到哪、為什麼這樣做、接下來大概要做什麼」,每次做完一個階段性任務就更新。
 
-最後更新:2026-07-20(第十七輪:加星保留 + `prune` 自動清理)
+最後更新:2026-09-22(第十八輪:GitHub Pages 展示頁 + Harbor 維護畫面;應用程式碼停在第十七輪)
 
 ## 現況一句話
 
@@ -18,6 +18,12 @@ hybrid search、文件分類、RSS 訂閱(CLI+網頁)、**Streamlit 五分頁網
 
 ## 逐輪變更摘要(新到舊,只留還有效的結論)
 
+- **18**(2026-07-25~09-15,沒改應用程式碼):**GitHub Pages 展示頁**。commit `afb44a7` 新增
+  `index.md`,跟偏開發筆記的 README 分開,當作對外的入口頁;Pages 已啟用(`master` 根目錄,
+  https://frobel0520.github.io/second-brain/ ,狀態 built)。2026-09-15 commit `91332c9` 新增
+  `_includes/head-custom.html`(沿用 primer 主題原本內容),在 `<head>` 載入 Harbor 主控台的前端腳本
+  (`data-project=second-brain`):維護模式時顯示全螢幕維護畫面、有公告時顯示底部公告列,
+  Harbor 連不上時頁面照常顯示。
 - **17**(2026-07-20,commit `2fa9e05`):使用者提議「新聞留一週、加星永久保留」,討論後直接動工
   (使用者說「直接做」,沒有停在 dry-run)。加三個 CLI 指令:`star <source>` / `unstar <source>`
   (依來源路徑/網址切換加星狀態)、`prune [--days 7] [-y]`(刪除超過天數、且沒加星的文件,沿用
@@ -268,9 +274,10 @@ CLAUDE.md「未來規劃」剩下的 + 這輪浮現的候選:
 
 ## 交接檢查清單
 
-1. `git log --oneline` / `git status --short --branch`:**第 17 輪已 commit `2fa9e05`**(16→
-   `12da665`、15→`e8e1959`、13→`f846938`、10→`f0ef6d6`、9→`f44d231`);11/12/14 沒改碼。工作目錄
-   應乾淨。`.claude/launch.json` 改過(`autoPort:true`)但在 `.gitignore` 裡,不會出現在 `git status`。
+1. `git log --oneline` / `git status --short --branch`:**`origin/master` 最新是 `91332c9`**(第 18 輪
+   Harbor 腳本,直接在 GitHub 上合入;2026-09-22 時本機 `master` 還落後 1 個 commit,開工先 `git pull`)。
+   第 18 輪 Pages 展示頁 `afb44a7`、第 17 輪 `2fa9e05`(16→`12da665`、15→`e8e1959`、13→`f846938`、
+   10→`f0ef6d6`、9→`f44d231`);11/12/14 沒改碼。工作目錄應乾淨(除了這份 Progress.md 的更新)。`.claude/launch.json` 改過(`autoPort:true`)但在 `.gitignore` 裡,不會出現在 `git status`。
 2. **機器層級設定,不在 git,換機器要重建**:Windows 排程工作 `SecondBrainFeedsSync`(每天 08:00);
    開始功能表「Second Brain」捷徑;`.streamlit/credentials.toml`。
 3. **知識庫有真實資料,別誤刪**:9 個訂閱(科技=iThome/TechNews/DIGITIMES,財經=經濟日報/自由時報
