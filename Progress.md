@@ -275,9 +275,9 @@ CLAUDE.md「未來規劃」剩下的 + 這輪浮現的候選:
 ## 交接檢查清單
 
 1. `git log --oneline` / `git status --short --branch`:**`origin/master` 最新是 `91332c9`**(第 18 輪
-   Harbor 腳本,直接在 GitHub 上合入;2026-09-22 時本機 `master` 還落後 1 個 commit,開工先 `git pull`)。
+   Harbor 腳本,直接在 GitHub 上合入),之後是 2026-09-22 的 Progress 更新 `472a3e3`。
    第 18 輪 Pages 展示頁 `afb44a7`、第 17 輪 `2fa9e05`(16→`12da665`、15→`e8e1959`、13→`f846938`、
-   10→`f0ef6d6`、9→`f44d231`);11/12/14 沒改碼。工作目錄應乾淨(除了這份 Progress.md 的更新)。`.claude/launch.json` 改過(`autoPort:true`)但在 `.gitignore` 裡,不會出現在 `git status`。
+   10→`f0ef6d6`、9→`f44d231`);11/12/14 沒改碼。工作目錄應乾淨。`.claude/launch.json` 改過(`autoPort:true`)但在 `.gitignore` 裡,不會出現在 `git status`。
 2. **機器層級設定,不在 git,換機器要重建**:Windows 排程工作 `SecondBrainFeedsSync`(每天 08:00);
    開始功能表「Second Brain」捷徑;`.streamlit/credentials.toml`。
 3. **知識庫有真實資料,別誤刪**:9 個訂閱(科技=iThome/TechNews/DIGITIMES,財經=經濟日報/自由時報
