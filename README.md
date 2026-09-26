@@ -2,7 +2,17 @@
 
 Local-first 個人化知識管理系統。把分散在各處的筆記整合成一個可語意搜尋、可問答的本機知識庫。
 
-設計原則與規劃詳見 [CLAUDE.md](CLAUDE.md)。這份 README 記錄目前實際長出來的架構與怎麼用。
+設計原則與規劃詳見 [CLAUDE.md](CLAUDE.md)。這份 README 記錄目前實際長出來的架構與怎麼用；逐輪進度與交接筆記在 [Progress.md](Progress.md)。
+
+對外介紹頁（GitHub Pages）：https://frobel0520.github.io/second-brain/ ，內容來自 [index.md](index.md)。
+
+## 現況（2026-09-22）
+
+- 18 個 CLI 指令、Streamlit 五分頁網頁介面、118 個測試。
+- 搜尋是 hybrid search（語意＋BM25 關鍵字），文件可依訂閱來源分類（科技／新聞／財經）。
+- 新聞類文章保留一週：`star` 加星的永久保留，其餘用 `prune` 清掉。
+- RSS 每天 08:00 由 Windows 工作排程器自動同步（機器層級設定，不在 git 裡）。
+- 應用程式碼停在 2026-07-20；之後只加了展示頁與 Harbor 維護畫面。
 
 ## Quick Start
 
@@ -14,9 +24,11 @@ python -m venv .venv
 ./.venv/Scripts/python.exe -m second_brain add-feed https://example.com/feed.xml
 ./.venv/Scripts/python.exe -m second_brain feeds add https://example.com/feed.xml
 ./.venv/Scripts/python.exe -m second_brain feeds sync
-./.venv/Scripts/python.exe -m second_brain search "想搜尋的內容"
+./.venv/Scripts/python.exe -m second_brain search "想搜尋的內容" -c 科技
 ./.venv/Scripts/python.exe -m second_brain ask "想問的問題"
 ./.venv/Scripts/python.exe -m second_brain list
+./.venv/Scripts/python.exe -m second_brain star https://example.com/article
+./.venv/Scripts/python.exe -m second_brain prune --days 7
 ./.venv/Scripts/python.exe -m second_brain translate
 ./.venv/Scripts/python.exe -m second_brain remove path/to/note.md
 ./.venv/Scripts/python.exe -m second_brain clear --yes
@@ -39,9 +51,13 @@ CLI 之外還有一個本機網頁介面,同一個知識庫、同一套底層邏
 ./.venv/Scripts/python.exe -m streamlit run second_brain/interface/web.py
 ```
 
-跑起來後瀏覽器會自動開 `http://localhost:8501`,五個分頁:瀏覽(含刪除、有翻譯的文件可以展開看繁體中文翻譯,下方還有批次刪除區塊,對應 CLI 的 `remove-batch`)、搜尋、問答、新增筆記(上傳檔案 / 一次性抓 RSS)、訂閱管理(常態追蹤 RSS 來源:訂閱/同步/取消訂閱,對應 CLI 的 `feeds` 指令組)。沒有網頁版的 `clear`/`translate`,清空知識庫、批次補翻譯還是要用 CLI(前者是危險操作,後者是因為批次翻譯可能要跑一段時間,CLI 比較適合)。
+跑起來後瀏覽器會自動開 `http://localhost:8501`,五個分頁(用 `st.segmented_control` 切換):
 
-**更快的啟動方式**(Windows):直接雙擊專案根目錄的 [run_web.bat](run_web.bat),或桌面上的「Second Brain」捷徑(第一次設定時建立的,指向這個 `.bat`)。
+- **瀏覽**:依加入時間新到舊,一頁 10 筆、左右兩欄,箭頭分頁;卡片右上角的 ☆／★ 切換加星(卡片上已沒有單篇刪除鈕);有翻譯的文件可以展開看繁體中文;下方是批次刪除區塊(對應 CLI 的 `remove-batch`)。
+- **搜尋**:可限定分類,排序可選相關性或日期新到舊。
+- **問答**、**新增筆記**(上傳檔案 / 一次性抓 RSS,成功後自動跳到瀏覽)、**訂閱管理**(訂閱/同步/取消訂閱,「同步全部」的失敗會折疊分組,對應 CLI 的 `feeds` 指令組)。沒有網頁版的 `clear`/`translate`,清空知識庫、批次補翻譯還是要用 CLI(前者是危險操作,後者是因為批次翻譯可能要跑一段時間,CLI 比較適合)。
+
+**更快的啟動方式**(Windows):直接雙擊專案根目錄的 [run_web.bat](run_web.bat),或開始功能表裡的「Second Brain」捷徑(指向這個 `.bat`,機器層級設定、不在 git 裡)。
 
 > Streamlit 第一次在沒有終端機互動的情況下啟動(例如雙擊捷徑)會卡住,原因是它會跳出一個一次性的「Welcome to Streamlit」提示,等使用者按 Enter 或輸入 email,但雙擊捷徑開的視窗沒有人能輸入,所以會卡住不動、永遠打不開網頁。[run_web.bat](run_web.bat) 已經處理這個問題:啟動前會自動檢查 `%USERPROFILE%\.streamlit\credentials.toml` 存不存在,不存在就自動建一個空的,讓 Streamlit 略過這個提示。如果直接用 `streamlit run` 指令手動啟動(在終端機裡跑,可以互動),不會遇到這個問題。
 
@@ -59,13 +75,15 @@ second_brain/
 │   ├── chunking.py       # chunk_text() / chunk_document()
 │   ├── embedding.py      # EmbeddingProvider 抽象介面 + SentenceTransformer 實作
 │   ├── tagging.py        # TaggingProvider 抽象介面 + 本機 jieba 詞頻抽取實作
+│   ├── text.py           # tokenize():jieba 斷詞 + 停用詞,標籤與 BM25 共用
 │   └── translation.py    # TranslationProvider 抽象介面 + Anthropic API 實作(翻成繁體中文)
 ├── storage/          # SQLite + ChromaDB 讀寫封裝
 │   ├── sqlite_store.py   # metadata / 原文 (SQLite)
 │   ├── vector_store.py   # embedding (ChromaDB, persistent, 本機檔案)
 │   └── store.py          # 對外唯一介面: save_document(), search_similar(), list_documents(), get_document(), replace_existing_document(), remove_document(), remove_documents(), find_documents(), clear_all(), subscribe_feed(), unsubscribe_feed(), list_feed_subscriptions(), mark_feed_synced(), list_documents_missing_translation(), update_translated_content()
 ├── retrieval/         # 語意搜尋、RAG 問答
-│   ├── search.py         # search(): query 轉 embedding → search_similar(),回傳的 SearchResult 帶 document.created_at
+│   ├── search.py         # search(): hybrid search——語意分數與 BM25 分數各自 min-max 正規化後加權(各 0.5),可限定分類
+│   ├── keyword_search.py # BM25 關鍵字分數(rank_bm25),語料每次從 SQLite 即時撈
 │   └── ask.py            # ask(): search() 結果組 context → 呼叫 Anthropic API 做問答,回傳 AskResult(answer, sources)
 └── interface/
     ├── cli.py            # typer CLI app
@@ -95,19 +113,37 @@ second_brain/
 
 | 指令 | 狀態 | 說明 |
 |---|---|---|
-| `second-brain add <file_path>` | ✅ 已實作 | 讀取 markdown/text 檔案 → 自動標籤 → 切塊 → 產生 embedding → 存進 SQLite + ChromaDB |
-| `second-brain add-feed <feed_url> [--limit/-n N]` | ✅ 已實作 | 一次性抓取 RSS/Atom 來源,每篇文章當一份筆記加入知識庫(預設最多 10 篇),不會記住這個來源 |
-| `second-brain feeds add <feed_url> [--name] [--limit/-n N]` | ✅ 已實作 | 把來源加進訂閱清單並立刻同步一次;名稱不給的話會嘗試抓 feed 標題,抓不到就用網址本身 |
+| `second-brain add <file_path> [-c 分類]` | ✅ 已實作 | 讀取 markdown/text 檔案 → 自動標籤 → 切塊 → 產生 embedding → 存進 SQLite + ChromaDB |
+| `second-brain add-feed <feed_url> [--limit/-n N] [-c 分類]` | ✅ 已實作 | 一次性抓取 RSS/Atom 來源,每篇文章當一份筆記加入知識庫(預設最多 10 篇),不會記住這個來源 |
+| `second-brain feeds add <feed_url> [--name] [--limit/-n N] [-c 分類]` | ✅ 已實作 | 把來源加進訂閱清單並立刻同步一次;名稱不給的話會嘗試抓 feed 標題,抓不到就用網址本身 |
 | `second-brain feeds list` | ✅ 已實作 | 列出訂閱清單(名稱、網址、上次同步時間) |
 | `second-brain feeds remove <feed_url>` | ✅ 已實作 | 從訂閱清單移除來源,不會刪除已經加入知識庫的文章 |
-| `second-brain feeds sync [--limit/-n N]` | ✅ 已實作 | 同步訂閱清單裡的所有來源,抓新文章、更新舊文章,一個來源失敗不會擋住其他來源 |
-| `second-brain search "<query>" [--top-k K]` | ✅ 已實作 | 把 query 轉成向量,語意搜尋,回傳最相關的片段(含來源、分數、加入時間) |
-| `second-brain ask "<query>" [--top-k K]` | ✅ 已實作 | 在 search 結果基礎上用 Anthropic API(`claude-opus-4-8`)做 RAG 問答,答案下面附來源標題與時間,需要 `ANTHROPIC_API_KEY` |
-| `second-brain list` | ✅ 已實作 | 列出知識庫裡目前有哪些文件(標題、片段數、來源路徑、標籤、有沒有翻譯) |
+| `second-brain feeds sync [--limit/-n N] [--log-file PATH]` | ✅ 已實作 | 同步訂閱清單裡的所有來源,抓新文章、更新舊文章,一個來源失敗不會擋住其他來源;`--log-file` 附加一行彙總(給排程用) |
+| `second-brain feeds set-category <feed_url> <分類>` | ✅ 已實作 | 改訂閱來源的分類,只影響之後同步進來的文章 |
+| `second-brain search "<query>" [--top-k K] [-c 分類]` | ✅ 已實作 | hybrid search(語意 + BM25),回傳最相關的片段(含來源、合併分數、加入時間) |
+| `second-brain ask "<query>" [--top-k K] [-c 分類]` | ✅ 已實作 | 在 search 結果基礎上用 Anthropic API(`claude-opus-4-8`)做 RAG 問答,答案下面附來源標題與時間,需要 `ANTHROPIC_API_KEY` |
+| `second-brain list [-c 分類]` | ✅ 已實作 | 列出知識庫裡目前有哪些文件(標題、片段數、來源路徑、標籤、有沒有翻譯) |
+| `second-brain star <source>` / `unstar <source>` | ✅ 已實作 | 切換加星;加星的文件 `prune` 不會刪 |
+| `second-brain prune [--days 7] [--yes/-y]` | ✅ 已實作 | 刪除超過天數且沒加星的文件,刪除前預覽並確認;目前沒有接進排程 |
+| `second-brain set-category <分類> [篩選條件] [--yes/-y]` | ✅ 已實作 | 用跟 `remove-batch` 相同的篩選條件,把符合的文件設成同一個分類 |
 | `second-brain translate` | ✅ 已實作 | 幫還沒有翻譯的文件補上繁體中文翻譯,需要 `ANTHROPIC_API_KEY`;遇到認證失敗會直接停止並清楚回報 |
 | `second-brain remove <source>` | ✅ 已實作 | 從知識庫移除指定來源的紀錄(sqlite + chroma),不動硬碟上的檔案本身;本機檔案路徑或 RSS 文章網址都可以,檔案不用還存在 |
 | `second-brain remove-batch [--after DATE] [--before DATE] [--keyword K] [--source S] [--yes/-y]` | ✅ 已實作 | 依日期範圍/關鍵字/來源批次刪除文件,三種條件符合任一個就刪(OR);至少要給一個條件;刪除前列出符合項目並要求確認 |
 | `second-brain clear [--yes/-y]` | ✅ 已實作 | 清空整個知識庫(sqlite + chroma);預設會互動確認,`--yes` 跳過確認 |
+
+## 文件分類
+
+分類是自由文字(目前用 `科技`／`新聞`／`財經`),存在每份文件上,不是即時從訂閱表 join。`add`/`add-feed`/`feeds add` 都可以用 `-c` 指定;`feeds sync` 會用訂閱目前的分類覆蓋這次抓到的文章。取消訂閱或改分類不會改動已經存在的舊文章。
+
+## 排程自動化
+
+用 Windows 內建工作排程器,工作名稱 `SecondBrainFeedsSync`,每天 08:00 執行 `feeds sync --log-file data\sync.log`。這是機器層級設定,不在 git 裡,換電腦要重新註冊。查狀態:看 `data/sync.log`,或 `Get-ScheduledTask -TaskName SecondBrainFeedsSync | Get-ScheduledTaskInfo`。
+
+注意:設定 `ANTHROPIC_API_KEY` 之後,排程同步進來的新文章也會自動翻譯,會開始產生 API 費用。
+
+## GitHub Pages 展示頁
+
+`index.md` 是對外介紹頁,`master` 分支根目錄由 GitHub Pages 以 primer 主題發布。`_includes/head-custom.html` 在 `<head>` 載入 Harbor 維護腳本(`data-project="second-brain"`,2026-09-15 起),Harbor 連不上時頁面照常顯示。應用程式本身不上雲,維持 local-first。
 
 ## 開發
 
