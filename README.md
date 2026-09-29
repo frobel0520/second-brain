@@ -1,18 +1,32 @@
 # Second Brain
 
-Local-first 個人化知識管理系統。把分散在各處的筆記整合成一個可語意搜尋、可問答的本機知識庫。
+> Local-first 個人化知識管理系統。把分散在各處的筆記整合成一個可語意搜尋、可問答的本機知識庫。
+
+## 概覽
 
 設計原則與規劃詳見 [CLAUDE.md](CLAUDE.md)。這份 README 記錄目前實際長出來的架構與怎麼用；逐輪進度與交接筆記在 [Progress.md](Progress.md)。
 
 對外介紹頁（GitHub Pages）：https://frobel0520.github.io/second-brain/ ，內容來自 [index.md](index.md)。
 
-## 現況（2026-09-22）
+## 主要功能／內容
+
+本機知識庫支援筆記整合、混合搜尋、問答、CLI 與 Streamlit 網頁介面；詳細操作沿用下方既有說明。
+
+## 現況與已知限制
+
+原 README 記錄應用程式碼停在 2026-07-20；之後增加展示頁與 Harbor 維護畫面。執行環境與排程未在本次重新確認。
 
 - 18 個 CLI 指令、Streamlit 五分頁網頁介面、118 個測試。
 - 搜尋是 hybrid search（語意＋BM25 關鍵字），文件可依訂閱來源分類（科技／新聞／財經）。
 - 新聞類文章保留一週：`star` 加星的永久保留，其餘用 `prune` 清掉。
 - RSS 每天 08:00 由 Windows 工作排程器自動同步（機器層級設定，不在 git 裡）。
 - 應用程式碼停在 2026-07-20；之後只加了展示頁與 Harbor 維護畫面。
+
+## 授權與來源
+
+Repository 根目錄未見授權檔；此 README 不另行宣告使用或再散布權利。
+
+---
 
 ## Quick Start
 
